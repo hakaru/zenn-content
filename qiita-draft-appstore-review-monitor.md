@@ -1,16 +1,10 @@
----
-title: "App Store審査の監視を自動化するGitHub Actionを作った"
-emoji: "🚀"
-type: "tech"
-topics: ["githubactions", "ios", "appstore", "apple", "automation"]
-published: true
----
+# App Store審査の監視を自動化するGitHub Actionを作った
 
 ## 概要
 
-App Store Connectの審査ステータスを3時間ごとに自動チェックし、変化があればGitHub Issue / Slack / Discord / Teamsに通知するGitHub Actionを作りました。
+App Store Connectの審査ステータスを3時間ごとに自動チェックし、変化があればGitHub Issue / Slack / Discord / Teamsに通知するGitHub Actionを公開しました。
 
-https://github.com/marketplace/actions/app-store-review-monitor
+**GitHub Marketplace:** https://github.com/marketplace/actions/app-store-review-monitor
 
 ```yaml
 - uses: hakaru/appstore-review-monitor@v1
@@ -29,7 +23,7 @@ iOSアプリを個人開発していると、App Storeに提出した後の審�
 - リジェクトされてたのに気づくのが遅れて対応が後手に
 - 承認されてたのに気づかずリリースが遅れる
 
-**「提出したら忘れて、変化があったら教えてくれ」** を実現したくて作りました。
+**「提出したら忘れて、変化があったら教えてくれ」** を実現するために作りました。
 
 ## 仕組み
 
@@ -45,15 +39,15 @@ App Store Connect API (JWT認証 / ES256)
 GitHub Issue作成 + Slack/Discord/Teams通知
 ```
 
-### ポイント
+### 技術的なポイント
 
-**1. 前回ステータスの保存方法**
+#### 1. 前回ステータスの保存方法
 
-GitHub Actionsには永続ストレージがないため、`asc-monitor`ラベルのIssueをステータスキャッシュとして使っています。ステータス変化時に古いIssueをクローズして新しいIssueを作成。外部DBやファイルストレージ不要。
+GitHub Actionsには永続ストレージがないため、`asc-monitor`ラベルのIssueをステータスキャッシュとして使っています。ステータス変化時に古いIssueをクローズして新しいIssueを作成。外部DBやファイルストレージ不要です。
 
-**2. JWT認証（ES256）**
+#### 2. JWT認証（ES256）
 
-App Store Connect APIはJWT認証が必要です。Node.jsの`crypto`モジュールだけで実装しています。
+App Store Connect APIはJWT認証が必要です。Node.jsの`crypto`モジュールだけで実装。
 
 ```javascript
 const sign = crypto.createSign('SHA256');
@@ -64,15 +58,17 @@ const signature = sign.sign(
 );
 ```
 
-`dsaEncoding: 'ieee-p1363'`がポイント。これがないとDER形式になりApp Store Connect APIが受け付けません。
+:::note warn
+`dsaEncoding: 'ieee-p1363'`がポイントです。デフォルトのDER形式ではApp Store Connect APIが受け付けません。
+:::
 
-**3. リジェクト時の詳細取得**
+#### 3. リジェクト時の詳細取得
 
-リジェクトを検出した場合、`appStoreReviewDetail`と`reviewSubmissions`エンドポイントからできる限り詳細を取得してIssueに記録します。
+リジェクトを検出した場合、`appStoreReviewDetail`と`reviewSubmissions`エンドポイントから詳細を取得してIssueに記録します。
 
 ## 通知チャネル
 
-GitHub Issues以外に、Webhook URLを設定するだけで通知先を追加できます。
+Webhook URLを設定するだけで通知先を追加できます。全てオプショナル、複数同時指定OK。
 
 | 通知先 | 設定 | 形式 |
 |--------|------|------|
@@ -81,8 +77,6 @@ GitHub Issues以外に、Webhook URLを設定するだけで通知先を追加�
 | Discord | `discord-webhook-url` | Embedメッセージ |
 | Microsoft Teams | `teams-webhook-url` | Adaptive Card |
 
-全てオプショナル。複数同時指定OK。
-
 ## ステータス一覧
 
 | ステータス | 絵文字 | 意味 |
@@ -90,11 +84,11 @@ GitHub Issues以外に、Webhook URLを設定するだけで通知先を追加�
 | WAITING_FOR_REVIEW | 🕐 | 審査キューに入った |
 | IN_REVIEW | 🔍 | 審査中 |
 | REJECTED | 🚨 | リジェクト |
-| READY_FOR_DISTRIBUTION | 🎉 | 承認！ |
+| READY_FOR_DISTRIBUTION | 🎉 | 承認 |
 | PROCESSING_FOR_DISTRIBUTION | ⏳ | 配信準備中 |
 | PENDING_DEVELOPER_RELEASE | 📦 | 手動リリース待ち |
 
-## セットアップ
+## セットアップ（5分で完了）
 
 ### 1. App Store Connect APIキーの作成
 
@@ -113,9 +107,13 @@ gh secret set SLACK_WEBHOOK --body "https://hooks.slack.com/services/..."
 gh secret set DISCORD_WEBHOOK --body "https://discord.com/api/webhooks/..."
 ```
 
+:::note info
 App IDは App Store ConnectのURL `https://appstoreconnect.apple.com/apps/XXXXXXXXXX/appstore` から確認できます。
+:::
 
 ### 3. ワークフローを追加
+
+`.github/workflows/review-monitor.yml` を作成：
 
 ```yaml
 name: App Store Review Monitor
@@ -154,11 +152,11 @@ outputsを使って後続の処理を分岐できます。
     asc-issuer-id: ${{ secrets.ASC_ISSUER_ID }}
     asc-private-key: ${{ secrets.ASC_PRIVATE_KEY }}
 
-# 承認されたらデプロイ
+# 承認されたら通知
 - if: steps.review.outputs.status == 'READY_FOR_DISTRIBUTION'
-  run: echo "App approved!"
+  run: echo "App approved! 🎉"
 
-# リジェクトされたらSlack通知
+# リジェクトされたら通知
 - if: contains(steps.review.outputs.status, 'REJECTED')
   run: echo "Rejected. See issue #${{ steps.review.outputs.issue-number }}"
 ```
@@ -174,19 +172,18 @@ outputsを使って後続の処理を分岐できます。
 
 | ツール | 審査ステータス監視 | 通知先 | Marketplace |
 |--------|-------------------|--------|-------------|
-| appstore-status-bot | あり | Slackのみ | なし |
-| ZReviewTender | なし（レビュー収集） | Slack | あり |
-| **appstore-review-monitor** | **あり** | **Issues + Slack + Discord + Teams** | **あり** |
+| appstore-status-bot | ⭕ | Slackのみ | ❌ |
+| ZReviewTender | ❌（レビュー収集） | Slack | ⭕ |
+| **appstore-review-monitor** | **⭕** | **Issues + Slack + Discord + Teams** | **⭕** |
 
 ## まとめ
 
-「提出したら忘れる」を実現するために作ったGitHub Actionです。
+- **セットアップ5分** — Secrets設定 + ワークフロー追加だけ
+- **外部サービス不要** — GitHub Actionsだけで完結
+- **マルチ通知** — Slack / Discord / Teams 対応
+- **無料・オープンソース**
 
-- セットアップ5分
-- 外部サービス不要（GitHub Actionsだけで完結）
-- Slack / Discord / Teams対応
-- 無料・オープンソース
+**GitHub Marketplace:** https://github.com/marketplace/actions/app-store-review-monitor
+**リポジトリ:** https://github.com/hakaru/appstore-review-monitor
 
-https://github.com/marketplace/actions/app-store-review-monitor
-
-フィードバックやPRお待ちしています。
+フィードバックやPRお待ちしています！

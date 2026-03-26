@@ -10,7 +10,7 @@ published: true
 
 ミュージシャンが練習やリハーサルを「ワンタップでプロ品質の音」で録音できるiOSアプリ **1Take** を作りました。
 
-https://apps.apple.com/app/id6742508490
+https://apps.apple.com/us/app/1take/id6757945099
 
 「録音ボタンを押すだけで、スタジオ機材を通したような音で録れる」がコンセプトです。
 
@@ -159,4 +159,4 @@ Swift 6のStrict Concurrency Modeを全面採用。`DispatchQueue` は一切使�
 
 ミュージシャンの方、ぜひ試してみてください。フィードバックもお待ちしています。
 
-https://apps.apple.com/app/id6742508490
+https://apps.apple.com/us/app/1take/id6757945099

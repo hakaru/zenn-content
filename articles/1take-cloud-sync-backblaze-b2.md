@@ -1,5 +1,5 @@
 ---
-title: "音楽録音アプリに4つのクラウド同期を実装した話（iCloud / Dropbox / Google Drive / Backblaze B2）"
+title: "録音アプリに4つのクラウド同期を実装した話（Backblaze B2が安すぎる）"
 emoji: "☁️"
 type: "tech"
 topics: ["ios", "swift", "クラウドストレージ", "音楽", "個人開発"]

@@ -2,7 +2,7 @@
 title: "DX7をSwiftで再実装した話 — FM音源の仕様書と格闘した1年"
 emoji: "🎹"
 type: "tech"
-topics: ["swift", "audio", "dsp", "個人開発", "シンセサイザー"]
+topics: ["swift", "audio", "dsp", "synthesizer", "coreaudio"]
 published: true
 ---
 

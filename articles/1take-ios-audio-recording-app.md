@@ -2,7 +2,7 @@
 title: "ミュージシャン向け録音アプリ「1Take」を個人開発した話"
 emoji: "🎙️"
 type: "tech"
-topics: ["ios", "swift", "swiftui", "audio", "個人開発"]
+topics: ["ios", "swift", "swiftui", "audio", "music"]
 published: true
 ---
 

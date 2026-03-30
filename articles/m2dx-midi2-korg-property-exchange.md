@@ -2,7 +2,7 @@
 title: "MIDI 2.0のProperty Exchangeを実装してKORGキーボードと会話させた話"
 emoji: "🎹"
 type: "tech"
-topics: ["midi", "swift", "ios", "音楽", "個人開発"]
+topics: ["midi", "swift", "ios", "coreaudio", "bluetooth"]
 published: true
 ---
 

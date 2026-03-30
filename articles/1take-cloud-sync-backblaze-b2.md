@@ -2,7 +2,7 @@
 title: "録音アプリに4つのクラウド同期を実装した話（Backblaze B2が安すぎる）"
 emoji: "☁️"
 type: "tech"
-topics: ["ios", "swift", "クラウドストレージ", "音楽", "個人開発"]
+topics: ["ios", "swift", "cloudstorage", "backblaze", "music"]
 published: true
 ---
 

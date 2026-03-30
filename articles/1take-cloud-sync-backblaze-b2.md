@@ -8,7 +8,7 @@ published: true
 
 自分で作ってる音楽録音アプリ「1Take」に、録音ファイルのクラウド自動同期を実装した。対応したのはiCloud Drive、Dropbox、Google Drive、Backblaze B2の4つ。
 
-https://apps.apple.com/app/id6738847498
+https://apps.apple.com/us/app/1take/id6757945099
 
 で、結論から言うと**Backblaze B2が安すぎて笑った**ので、その話を中心に書く。
 
@@ -152,4 +152,4 @@ WAVファイルは数百MBになるので、`URLSession.upload(for:fromFile:)`�
 
 個人的にはB2推し。特にWAVで録る人は容量がすぐ膨らむので、従量制の安さが効いてくる。1年録り続けても月¥100いかない。
 
-1Takeは[App Storeで配信中](https://apps.apple.com/app/id6738847498)。クラウド同期は無料機能なので、よかったら試してみてください。
+1Takeは[App Storeで配信中](https://apps.apple.com/us/app/1take/id6757945099)。クラウド同期は無料機能なので、よかったら試してみてください。

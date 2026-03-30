@@ -14,7 +14,7 @@ published: true
 
 「録音ボタン1つで、あとは勝手にいい感じにしてくれるアプリが欲しい」。なかったので作った。
 
-https://apps.apple.com/app/id6738847498
+https://apps.apple.com/us/app/1take/id6757945099
 
 ## リアルタイムエフェクトチェーン
 
@@ -138,4 +138,4 @@ LUFS計算もITU-R BS.1770-4の仕様書を読みながらKフィルター + ゲ
 
 ミュージシャンの方、よかったら使ってみてください。
 
-https://apps.apple.com/app/id6738847498
+https://apps.apple.com/us/app/1take/id6757945099

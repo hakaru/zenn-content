@@ -1,0 +1,15 @@
+title: "MIDI 2.0の闇と戦う — SimpleMidiControllerからMIDI2Kit開発まで"
+summary: "iPhoneをMIDIコントローラーにするアプリを作ったら、MIDI 2.0の仕様の闇、BLE MIDIの不可解な挙動、メーカー独自実装の壁にぶつかった。その過程で生まれたSwiftライブラリMIDI2Kitの開発記録。"
+topics: ["midi", "swift", "ios", "bluetooth", "coreaudio"]
+published: true
+price: 0
+chapters:
+  - introduction
+  - simple-midi-controller
+  - midi2-spec-darkness
+  - korg-reverse-engineering
+  - ble-midi-mystery
+  - midi2kit-birth
+  - iphone-only-limitation
+  - macos15-new-apis
+  - whats-next

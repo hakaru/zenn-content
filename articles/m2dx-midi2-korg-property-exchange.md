@@ -279,9 +279,7 @@ MIDI 2.0は規格としてはオープンなんだけど、メーカー独自の
 
 LCDに音色名を出すだけのつもりが、MIDI-CI Discovery、PE実装、KORGの独自仕様リバエン、BLE MIDIの信頼性対策までやる羽目になった。
 
-MIDI2Kitのソースは公開してある。MIDI 2.0のPE周りで困ってる人がいたら使ってみてほしい。
-
-https://midi2kit.dev/
+MIDI2Kit自体は今のところ手元で使ってるだけ。整ったら公開するかもしれない。
 
 M2DX-Core（DX7 FMシンセエンジン）:
 https://github.com/hakaru/M2DX-Core

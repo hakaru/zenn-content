@@ -28,21 +28,13 @@ MIDI 2.0の主な変更点:
 
 通信フォーマットもUMP（Universal MIDI Packet）に変わった。MIDI 1.0のバイト列ではなく、32ビットワードの固定長パケット。
 
-## MIDI2Kitを選んだ理由
+## CoreMIDIだけでは足りなかった
 
-AppleのCoreMIDIはiOS 15からUMPに対応している。ノートオン/オフやCCを受け取るだけならCoreMIDI直接でいい。
+AppleのCoreMIDIはiOS 15からUMPに対応してる。ノートオン/オフやCCを受け取るだけならこれでいい。
 
-問題はProperty ExchangeとMIDI-CI。CoreMIDIにはPEのAPIがない。自分でMIDI-CIのDiscovery、Capability Inquiry、PEのGET/SET/SUBSCRIBEを全部実装する必要がある。
+問題はProperty ExchangeとMIDI-CI。CoreMIDIにはPEのAPIがない。MIDI-CIのDiscovery、Capability Inquiry、PEのGET/SET/SUBSCRIBEを全部自前で実装する必要がある。MIDIKitにもPEサポートはない。
 
-候補は3つあった。
-
-| ライブラリ | MIDI-CI | Property Exchange | Per-Note CC |
-|:---:|:---:|:---:|:---:|
-| CoreMIDI（直接） | 部分的 | なし | UMPレベルで可 |
-| MIDIKit | なし | なし | あり |
-| MIDI2Kit | あり | あり（async/await） | UMPレベル |
-
-MIDI2Kitを選んだのはPEサポートがあったから。async/awaitベースのAPIで、`MIDI2Client`を作ってデバイスを発見し、PEでJSONをやりとりできる。
+ないなら作るしかない。MIDI2Kitという名前でSwiftパッケージにした。async/awaitベースのAPIで、`MIDI2Client`を作ってデバイスを発見し、PEでJSONをやりとりする。
 
 ```swift
 let client = try MIDI2Client(name: "M2DX")
@@ -92,7 +84,7 @@ let vel16 = (v << 9) | (v << 2) | (v >> 5)
 
 MIDI 2.0で個人的に一番面白いのがPer-Note Controller。通常のCCはチャンネル全体にかかるけど、Per-Noteは特定のノートだけに効く。
 
-たとえばCの音だけピッチベンドをかけて、Eはそのまま——みたいなことがMIDI規格レベルでできる。MPE（MIDI Polyphonic Expression）の後継にあたる機能。
+たとえばCの音だけピッチベンドをかけて、Eはそのまま、みたいなことがMIDI規格レベルでできる。MPE（MIDI Polyphonic Expression）の後継にあたる機能。
 
 エンジン側では、各ボイスにper-noteステートを持たせた。
 
@@ -146,15 +138,15 @@ MIDI2ResponderClient(configuration: .init(
 
 KeyStageがリクエストしてくるリソースは標準のもの（DeviceInfo、ResourceList、ProgramList）に加えて、KORG独自のものがある。
 
-- **X-ProgramEdit** — 現在の音色名とCCの値。KeyStageのLCDに音色名が表示される
-- **X-ParameterList** — CCパラメータの定義（名前、CC番号、デフォルト値）。KeyStageのノブに名前が出る
-- **parameterListSchema / programEditSchema** — 上2つのJSONスキーマ
+- `X-ProgramEdit` — 現在の音色名とCCの値。これがLCDに出る
+- `X-ParameterList` — CCパラメータの定義（名前、CC番号、デフォルト値）。ノブのラベルになる
+- `parameterListSchema` / `programEditSchema` — 上2つのJSONスキーマ
 
 X-ProgramEditの音色名フォーマットは`"1:E.PIANO 1"`のように1-based番号＋コロン＋名前。KORG Moduleと同じ形式にしないとKeyStageのLCDで正しく表示されない。これも仕様書には書いてない。KORG ModuleとKeyStageの通信をスニファして突き止めた。
 
 ### PE Notifyのエコーバック問題
 
-一番ハマったバグ。KeyStageからCCを受信すると、アプリ側のパラメータが更新される。パラメータが更新されるとPE Notifyでサブスクライバーに通知する——つまりKeyStageに送り返す。KeyStageがそれを受けてまたCCを送る。無限ループ。
+一番ハマったバグ。KeyStageからCCを受信すると、アプリ側のパラメータが更新される。パラメータが更新されるとPE Notifyでサブスクライバーに通知する。つまりKeyStageに送り返す。KeyStageがそれを受けてまたCCを送る。無限ループ。
 
 実際にはループにはならないけど、KeyStageのPEプロセッサが処理しきれなくなってLCDがフリーズする。
 
@@ -281,13 +273,13 @@ MIDI 2.0は規格としてはオープンなんだけど、メーカー独自の
 
 他のメーカー（Roland、Yamaha、Native Instruments等）がどうしてるかはテストできてない。MIDI 2.0対応のハードウェア自体がまだ少ないし、手元にKORG以外のMIDI 2.0デバイスがない。
 
-MIDI 2.0は「規格」と「実装」のギャップがまだ大きい。MIDI 1.0のときも似たような過渡期があったんだろうけど、PEやMIDI-CIのような高レベルプロトコルが絡むと互換性の問題はMIDI 1.0時代より複雑になる。
+規格と実装のギャップが大きいのは過渡期だから仕方ない。MIDI 1.0も最初はこんなだったんだろう。
 
-## おわりに
+## 結局
 
-「KeyStageのLCDに音色名を出したい」から始まって、MIDI-CIのDiscovery、Property Exchangeの実装、KORGの独自仕様のリバースエンジニアリング、BLE MIDIの信頼性対策まで。MIDIキーボードを繋ぐだけでこんなに深い穴があるとは思わなかった。
+LCDに音色名を出すだけのつもりが、MIDI-CI Discovery、PE実装、KORGの独自仕様リバエン、BLE MIDIの信頼性対策までやる羽目になった。
 
-MIDI2Kitのドキュメントとソースコードは公開してある。MIDI 2.0のPEを実装したい人の参考になれば。
+MIDI2Kitのソースは公開してある。MIDI 2.0のPE周りで困ってる人がいたら使ってみてほしい。
 
 https://midi2kit.dev/
 

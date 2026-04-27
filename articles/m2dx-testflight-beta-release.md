@@ -10,11 +10,9 @@ iOS 向けの MIDI 2.0 対応 DX7 互換 FM シンセサイザー **M2DX** を T
 
 https://testflight.apple.com/join/BAtGszPw
 
-6 オペレータ × 32 アルゴリズムのクラシックな FM サウンドを、Pure Swift 6 で完全再実装しています。シンセシスエンジンには別途公開している [M2DX-Core](https://hakaru.net/M2DX-Core-support/index-ja) ライブラリを使用しています。
+6 オペレータ × 32 アルゴリズムの DX7 系 FM 合成方式を、Pure Swift 6 で実装しています。シンセシスエンジンには別途公開している [M2DX-Core](https://hakaru.net/M2DX-Core-support/index-ja) ライブラリを使用しています。
 
-過去に書いた DX7 エンジン本体と Property Exchange の解説記事はこちら：
-
-https://zenn.dev/hakaru/articles/m2dx-core-dx7-fm-synth-swift
+関連の Property Exchange 解説記事はこちら：
 
 https://zenn.dev/hakaru/articles/m2dx-midi2-korg-property-exchange
 
@@ -38,10 +36,10 @@ M2DX はまだ**楽器として実用レベルには達していません**。�
 - macOS のバージョンごとの MIDI 2.0 サポート差異（CoreMIDI の挙動違い等）は完全には把握できていません
 - 各メーカーが MIDI 2.0 仕様の上に載せている独自拡張・独自プロファイルの解析は一部のみ（具体的には KORG の一部）対応しており、他社の独自実装は未着手です
 
-### DX7 プリセットの互換性検証
+### プリセットの音作り
 
-- 32 種類のファクトリープリセットを内蔵していますが、オリジナル DX7 との 1:1 のサウンド完全一致は、全プリセットでは検証しきれていません
-- バンク全体や SysEx パッチの読み込み互換性は今後の TestFlight ビルドで段階的に整備します
+- 32 種類の初期プリセットを内蔵していますが、ビンテージ FM 音源と比較したときの音作り検証は途上です
+- ユーザーが手元の `.syx` バンクを読み込めるパスは今後の TestFlight ビルドで段階的に整備します
 
 ### エフェクトチェーン
 
@@ -57,9 +55,9 @@ M2DX はまだ**楽器として実用レベルには達していません**。�
 
 Universal MIDI Packet (UMP) をネイティブにサポート。16 ビットベロシティ（65,536 段階）、32 ビット CC、32 ビットピッチベンドによる滑らかで表現力豊かな演奏が可能です。MIDI 1.0 にも自動フォールバックします。
 
-### DX7 互換 FM エンジン
+### DX7 系 6 オペレータ FM エンジン
 
-6 オペレータ × 32 アルゴリズムの完全な DX7 アルゴリズムセット。msfa / Dexed コアエンジンを直接移植した Int32 Q24 固定小数点演算により、オリジナル Yamaha OPS チップの動作をビット単位で再現します。32 種類のファクトリープリセット（BRASS1、E.PIANO1、WOOD BASS、FLUTE 1 など）を内蔵しています。
+6 オペレータ × 32 アルゴリズムの DX7 系 FM 合成エンジンを Pure Swift で実装。Int32 Q24 固定小数点演算により、ビンテージ FM 音源らしいキャラクターを目指しています。32 種類の初期プリセットを内蔵しています。
 
 ### 16 ボイス ポリフォニー
 

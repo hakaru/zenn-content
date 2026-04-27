@@ -12,7 +12,9 @@ https://testflight.apple.com/join/BAtGszPw
 
 6 オペレータ × 32 アルゴリズムの DX7 系 FM 合成方式を、Pure Swift 6 で実装しています。シンセシスエンジンには別途公開している [M2DX-Core](https://hakaru.net/M2DX-Core-support/index-ja) ライブラリを使用しています。
 
-関連の Property Exchange 解説記事はこちら：
+過去に書いた DX7 エンジン本体と Property Exchange の解説記事はこちら：
+
+https://zenn.dev/hakaru/articles/m2dx-core-dx7-fm-synth-swift
 
 https://zenn.dev/hakaru/articles/m2dx-midi2-korg-property-exchange
 

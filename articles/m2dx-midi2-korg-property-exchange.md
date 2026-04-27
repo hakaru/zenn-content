@@ -6,11 +6,7 @@ topics: ["midi", "swift", "ios", "coreaudio", "bluetooth"]
 published: true
 ---
 
-前回の記事でDX7のFM音源エンジンをSwiftで再実装した話を書いた。
-
-https://zenn.dev/hakaru/articles/m2dx-core-dx7-fm-synth-swift
-
-エンジンが動いたので次はMIDIキーボードをつなぎたい。手元にあるのはKORG KeyStage。MIDI 2.0対応のキーボードで、Property Exchange（PE）という仕組みでアプリとキーボードが双方向にデータをやりとりできる。
+DX7系のFM音源エンジン M2DX-Core を Pure Swift で書いてみたら、次はMIDIキーボードをつなぎたくなった。手元にあるのはKORG KeyStage。MIDI 2.0対応のキーボードで、Property Exchange（PE）という仕組みでアプリとキーボードが双方向にデータをやりとりできる。
 
 「キーボードのLCDに音色名を表示したい」。それだけの話のはずだった。
 

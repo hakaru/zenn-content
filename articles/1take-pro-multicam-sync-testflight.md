@@ -6,9 +6,13 @@ topics: ["ios", "swift", "video", "audio", "testflight"]
 published: true
 ---
 
-## TL;DR
+## TestFlightでベータを公開
 - 1Take（プロ向けオーディオ録音アプリ）に **カメラ同期 + マルチデバイス録音** を追加した **1Take Pro** のパブリックTestFlightベータを公開しました
 - **PeerClock** によるデバイス間の高精度時刻同期で、複数 iPhone/iPad を使ったマルチカメラ録音が **ハードウェア不要** で実現
+
+まだまだ機能的にも足りない部分がある認識。安定動作も実機検証が十分でないのでTestFlightベータにて情報収集をしたい。
+
+-　将来的には有料版配布を考えているがTestFlightベータ版はすでに公開済みの1TakeのPro機能も全てアンロックして公開
 - TestFlight（無料）: https://testflight.apple.com/join/Vk9S4kmn
 
 ---
@@ -49,6 +53,7 @@ iPhone A（マスター）  ──Wi-Fi──  iPhone B（スレーブ）
 - iPhone を複数台並べて、各デバイスで 1Take Pro を起動
 - マスターデバイスから「録音開始」を送信すると、全スレーブが同時録画開始
 - 音声・映像が同一タイムラインで記録される
+- BWF形式のファイル出力も可能なのでDAW/動画編集ソフトでタイムシンクが容易に。
 
 ---
 

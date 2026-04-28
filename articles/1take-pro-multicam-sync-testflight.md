@@ -3,7 +3,7 @@ title: "1Take Pro — iPhoneだけでマルチカメラ同期録音。Tentacle S
 emoji: "🎬"
 type: "tech"
 topics: ["ios", "swift", "video", "audio", "testflight"]
-published: false
+published: true
 ---
 
 ## TL;DR

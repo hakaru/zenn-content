@@ -7,7 +7,6 @@ published: true
 ---
 
 ## TL;DR
-
 - 1Take（プロ向けオーディオ録音アプリ）に **カメラ同期 + マルチデバイス録音** を追加した **1Take Pro** のパブリックTestFlightベータを公開しました
 - **PeerClock** によるデバイス間の高精度時刻同期で、複数 iPhone/iPad を使ったマルチカメラ録音が **ハードウェア不要** で実現
 - TestFlight（無料）: https://testflight.apple.com/join/Vk9S4kmn

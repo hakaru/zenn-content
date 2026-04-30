@@ -322,7 +322,18 @@ C/C++ で覚えた感覚で類推してくる、と言うと当たってる気�
 
 ## じゃあ、Swift をどうやって学習させる？
 
-「Swift も DSP も分かるローカル LLM」を手元で作るとしたら、ざっくり4択:
+ここが本記事の肝。「ローカル LLM は Swift を知らない」が原因と分かったので、**じゃあ知識をどう注入するか** を真面目に考えた。書きながら手を動かすうちに、 *気づけば 3 つ別プロジェクトを立ち上げる*ことになった。本節はその全体マップになる。
+
+選択肢は 4 つある。安い順から、A → D。
+
+```
+A. プロンプトに「Swift カンペ」を差し込む    ← 一番安い、効果未知
+B. RAG で Swift Book / Evolution を retrieval  ← 中コスト、広く効くはず
+C. LoRA で 14B〜22B モデルを fine-tune        ← 高コスト、効果最大候補
+D. 待つ                                       ← 一番楽
+```
+
+それぞれ「コスト・期待効果・どんな副作用が出そうか」が違う。並べて比較できるように、**同じ 9 モデル × 同じ M2DX-Core コード × 同じプロンプト**で v1 (本記事の baseline) からの改善幅を測る設計にしている。
 
 ### A. プロンプトに「Swift カンペ」を差し込む（一番安い）
 
@@ -345,47 +356,94 @@ When reviewing, verify each potential issue against these
 conventions before reporting.
 ```
 
-これだけで「`&-` は overflow 未チェック」みたいな絶対的な誤検出は **ほぼ消えるはず**（未検証だけど効くと思う）。Claude Code の `CLAUDE.md` や aider の設定に書いておけば毎回同じ前提で走る。**コスパは抜群**。
+これだけで「`&-` は overflow 未チェック」みたいな絶対的な誤検出は **ほぼ消えるはず**。Claude Code の `CLAUDE.md` や aider の設定に書いておけば毎回同じ前提で走る。
+
+> **仮説 (A)**: Swift セマンティクス系の誤検出 (前述 5 系統) を 70% 以上削減  
+> **コスト**: prompt 末尾に数百トークン足すだけ  
+> **副作用**: ほぼ無し（プロンプトが少し長くなるだけ）  
+> **状態**: ✅ **すでに 9 モデルで再走行を開始**。同じ 41 件の誤指摘がどこまで消えるか測定中。結果は本記事末尾に追記する予定
 
 ### B. RAG で Swift Book / Evolution を引かせる
 
-The Swift Programming Language Book と Swift Evolution proposals を chunked にしてベクトル DB に入れ、LLM が「`&+` の意味」みたいな疑問を持ったときに該当ページを retrieval する構成。中規模効果、中規模手間。LangChain か llama-index で2〜3日。
+The Swift Programming Language Book と Swift Evolution proposals を chunk にしてベクトル DB に入れ、LLM が `&+` や `tuple` のような語彙に出会ったとき、 *該当する仕様ページを動的に retrieval してプロンプトに差し込む*構成。
 
-### C. LoRA でファインチューニングする
+A は人間がカンペを手書きする。B は **公式仕様書をまるごと検索エンジンとして使う**。だから A が見落とした「actor isolation」「Sendable」「`guard let` の制御フロー」みたいな周辺領域にも、自動的に手が届く可能性がある。
 
-Mac Studio M3 Ultra 96GB だと **`mlx-lm` で 14B〜22B クラスの LoRA fine-tuning が現実的**。データの目安:
+llama-index か LangChain で 2〜3 日。embedding は `bge-large` をローカル ollama で動かせばクラウドに何も出さなくて済む。
 
-- The Swift Programming Language Book + Swift Evolution（〜1000ページ）の Q&A 整形版
-- OSS の「言語の細部を踏んでる Swift コード」: swift-foundation、swift-collections、swift-numerics、AudioKit など
-- 自分の M2DX-Core / MIDI2Kit のコード（DSP / RT / Q24 固定小数点 のような **狭い知識**を埋め込む）
-- **誤検出 → 正解** の対照学習データ — 今回 57件溜まったので、「このコードの `&-` はバグではない、なぜなら…」というペアを LLM が出すべき形に整形して学習させる
+> **仮説 (B)**: A よりカバー範囲が広く、 *自分が思いつかなかった誤読パターン*にも効く  
+> **コスト**: 中。chunk + embed + 検索パイプラインの構築  
+> **副作用**: prompt が長くなる（推論時間と TPS への影響）  
+> **状態**: 📝 **spec ドキュメント完了、実装待ち**。`swift-audit-rag` という別プロジェクトとして切り出した
 
-ベースは **qwen2.5-coder:14b** か **codestral:22b** あたり。GPU 時間で半日〜1日、データ作りに数日。 *DGX Spark を買う言い訳はここにある*。
+### C. LoRA でファインチューニングする — 一番効きそうで、一番楽しい
 
-ただし、こうして特化モデルを作っても **agentic harness（依存先 grep + 行番号検証）は別軸**。Swift 知識を植え付けても、ツールの問題は別途解決する必要がある。
+A と B は「推論時にプロンプトで何かを注入する」方向。C はそうじゃなくて、 **モデル本体の重みに Swift 知識を刻み込む**。
+
+Mac Studio M3 Ultra 96GB なら `mlx-lm` で 14B〜22B クラスの LoRA fine-tuning が普通に動く。学習データの構成案:
+
+- **The Swift Programming Language Book + Swift Evolution**（〜1000ページ）を Q&A 形式に整形
+- **OSS の「言語の細部を踏んでる Swift コード」**: swift-foundation、swift-collections、swift-numerics、AudioKit など
+- **自分の M2DX-Core / MIDI2Kit のコード**（DSP / RT / Q24 固定小数点 のような *狭くて深い*知識を埋め込む）
+- そして本記事のいちばん美味しい再利用先: **「誤検出 → 正解」の対照学習データ** — 今回集まった **57 件の false positive をそのまま DPO** に流す
+
+```jsonl
+{
+  "prompt": "Is `let rawInc = (4 + (qrate & 3)) << (8 + (qrate >> 2))` an overflow bug?",
+  "rejected": "Yes, the shift could be large and overflow Int32.",
+  "chosen":   "No. The previous line `qrate = min(63, ...)` clamps to 63, so the shift count ≤ 23 and the result ≤ 7<<23 = 58M, which fits Int32 with margin."
+}
+```
+
+つまり、 ***LLM が今回間違えた事例を、LLM 自身に学ばせる***フィードバックループを組める。これが C のいちばん面白いポイントだと思う。
+
+ベースは **qwen2.5-coder:14b** か **codestral:22b**。GPU 時間で半日〜1日、データ作りに数日。 *DGX Spark を買う言い訳がここにある*（けど、Mac Studio M3 Ultra で完結する見込み）。
+
+ただし、こうして特化モデルを作っても **agentic harness（依存先 grep + 行番号検証）は別軸の問題**で、これは harness 側で解決する必要がある。両方そろって初めて完璧な構成になる。
+
+> **仮説 (C)**: Swift 系誤検出を 80% 以上削減 + プロンプト augmentation 不要  
+> **コスト**: データ整形 3-4 日 + GPU 6-24 時間 + 評価 1 日  
+> **副作用 (重要)**: 他言語の能力（Python, JS）が劣化していないかを **HumanEval-Python で常時測定**する必要あり  
+> **状態**: 📝 **spec ドキュメント完了、実装待ち**。`swift-audit-lora` という別プロジェクトとして切り出した
 
 ### D. 待つ
 
-Apple が言語モデル特化版を出してくる、フロンティアが Swift 6 をもうちょっと真面目に学習してくれる、誰かが Swift 特化 LoRA を公開してくれる…のを待つ。一番省エネ。
+Apple が言語モデル特化版を出してくる、フロンティアが Swift 6 をもうちょっと真面目に学習してくれる、誰かが Swift 特化 LoRA を公開してくれる…のを待つ。一番省エネ、ただし能動的に何もしない。
 
----
+> **仮説 (D)**: 1〜2 年で問題が自然消滅する可能性はある  
+> **コスト**: 0  
+> **副作用**: その間、ローカル LLM 監査は使い物にならない  
+> **状態**: 何もしない
 
-個人開発の現実解としては、 **A（Swift カンペ）+ Claude Code でフロンティアを呼ぶ** が現状コスパ最強。LoRA は楽しいけど、データ整形と評価セット構築の労力対効用が個人だと厳しい。「Swift 特化ローカルモデル」は週末プロジェクトのテーマとしては最高だけど、 *本気でレビューを回したいなら A + Codex/Claude*。
+### 全体マップ
 
-### …とはいえ、A〜C は実際に試してみたくなるテーマ
+| 案 | コスト | 仮説効果 | 進行 |
+|---|---|---|---|
+| **A** cheat sheet | 低 | Swift 誤検出 -70% | ✅ 走行中 (`m2dx-audit-v2`) |
+| **B** RAG | 中 | カバー範囲広 | 📝 spec 完了 (`swift-audit-rag`) |
+| **C** LoRA | 高 | 最大効果 + 副作用 | 📝 spec 完了 (`swift-audit-lora`) |
+| **D** 待つ | 0 | — | — |
 
-書きながら「結論としては A」と整理したものの、 **B と C の効果がどこまで出るかは実測してみないと分からない**。なので、本記事の続編として 3 つ別プロジェクトを立てた:
+### 続編予告
 
-| 続編 | 担当案 | 状態 |
-|---|---|---|
-| **`m2dx-audit-v2`** (本記事内に組み込み予定) | A: cheat sheet pre-amble | 9 モデル走行中、結果は本記事に追記する予定 |
-| **`swift-audit-rag`** | B: Swift Book + Evolution を RAG で引かせる | spec ドキュメント完了、実装待ち。続編記事候補 |
-| **`swift-audit-lora`** | C: qwen2.5-coder:14b / codestral:22b に LoRA | spec ドキュメント完了、実装待ち。**「DGX Spark の言い訳」枠** |
+A → B → C と段階的に、 *Swift 知識をどこに置けば、ローカル LLM の何が改善するか* を測っていく。最終的に並べる比較表のイメージはこう:
 
-それぞれの prompt augmentation 戦略 (A→B→C) で、 **同じ 9 モデル × 同じ M2DX-Core コード**に対する v1 (本記事の baseline) からの精度改善を定量比較する設計。  
-特に C の LoRA は、本記事で集まった **57 件 false positive をそのまま DPO の対照学習データに転用**できる、という再帰的な使い道がある。
+| | v1 baseline | v2 (A) | v3 (B) | v4 (C) | v5 (B + C) |
+|---|---|---|---|---|---|
+| 総 findings | 41 | ? | ? | ? | ? |
+| **真陽性 (TP)** | **0** | **?** | **?** | **?** | **?** |
+| Swift系FP | 17 | ? | ? | ? | ? |
+| 行番号捏造 | 5+ | ? | ? | ? | ? |
 
-進捗が出たら、別記事で報告する予定（または本記事に追記する）。
+ここの「?」全部を埋めるのが、 **本記事の続編 3 本**の役割。
+
+- **続編 #1（A 答え合わせ）**: cheat sheet で 41 件のうち何件が消えたか。本記事末尾に追記予定
+- **続編 #2（B: RAG）**: 自分が思いつかなかった誤読パターンが retrieval でカバーされるか
+- **続編 #3（C: LoRA）**: 57 件の false positive を訓練データに転用したフィードバックループの効き目。 ***LLM が間違えた事例で LLM を再教育するとどうなるか***、というメタ的に面白いやつ
+
+特に C は、 **本記事で集まったデータがそのまま訓練データに化ける**ところがいちばん美味しい。失敗が再起動の燃料になるという、再帰的な気持ちよさがある。
+
+進捗が出たら、それぞれ別記事で報告する予定。 *とりあえず A の結果は近いうち本記事末尾に追記される*ので、たまに戻ってきてもらえれば。
 
 ## ところがリファクタリングだと話が逆転する
 

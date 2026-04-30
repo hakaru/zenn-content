@@ -6,42 +6,50 @@ topics: ["llm", "ollama", "swift", "security", "codereview"]
 published: false
 ---
 
-## やりたかったこと
+## 夜中に勝手に働いてくれるレビューワー、欲しくない？
 
 iOS/macOS向けのMIDI 2.0 FM音源アプリ **M2DX** を一人で書いている。心臓部の **M2DX-Core**（DX7互換エンジン、Pure Swift）はOSSで公開していて、そろそろ第三者の目を入れたい時期だった。
 
-普段の開発支援は Claude Code と Codex を使っているが、リポジトリ全体を機械的に舐めて issue 起票してくれる「夜中に勝手に走らせるレビューワー」が欲しかった。Cloud に毎回投げるのもAPIコスト的に微妙だし、手元の **Mac Studio M2 Ultra / 96GB** に ollama を入れて 70B〜141B クラスを動かせる環境はあるので、「ローカルLLMでバグ監査・セキュリティ監査をやってみよう」という素朴な発想だった。
+普段の開発支援は Claude Code と Codex を使ってるんだけど、欲しいのはちょっと違う方向性で、「リポジトリ全体を機械的に舐めて、夜中に勝手に走らせて朝起きたら issue が並んでる」みたいなレビューワーが欲しかった。手元には **Mac Studio M2 Ultra / 96GB**。70B〜141Bクラスのローカルモデルがちゃんと動くスペック。これを遊ばせとくのもなあ、と思って ollama を立ち上げた。
 
-結論から言うと:
+結論を先に書くと:
 
-- **バグ監査**: 10モデル横断で **41件の指摘 → 真陽性 0件**
-- **セキュリティ監査**: 5モデル中4モデル完走、**16件の指摘 → 真陽性 0件**
-- 累計 **57件、TP 0件**
+- **バグ監査**: 10モデル走らせて **41件指摘 → 真陽性 0件**
+- **セキュリティ監査**: 5モデル中4モデル完走、**16件指摘 → 真陽性 0件**
+- 累計 **57件、当たり 0件**
 
-なぜそうなったかを書く。
+全敗である。なぜそうなったかを書いていく。
 
-## 監査対象
+## 何を読ませたか
 
-- **DX7Envelope.swift** (178行): EG（4-rate/4-level）、Q16固定小数点
-- **DX7Operator.swift** (85行): オペレータ、Q24位相、フィードバックバッファ
-- **DX7Voice.swift** (472行): 6オペレータ × 32アルゴリズム ディスパッチ、PitchEG
-- **Algorithm.swift**: 32アルゴリズムのフラグテーブル
+DX7エンジンの中核ファイル4つ:
 
-セキュリティ監査では追加で:
+- **DX7Envelope.swift** (178行) — EG（4-rate/4-level）、Q16固定小数点
+- **DX7Operator.swift** (85行) — オペレータ、Q24位相、フィードバックバッファ
+- **DX7Voice.swift** (472行) — 6オペレータ × 32アルゴリズム ディスパッチ
+- **Algorithm.swift** — 32アルゴリズムのフラグテーブル
 
-- **DX7SysExParser.swift** (120行): iCloud/AirDrop経由の untrusted な .syx パース
-- **UserBankManager.swift** (90行): fileImporter、security-scoped resource
-- **MIDIInputManager.swift** (1,132行): MIDI 2.0 UMP デコード、PE JSON
-- **PEResponderHost.swift** (374行): Property Exchange responder
-- **USBResetHelper.c** (84行): IOKit USB reset (macOS)
+セキュリティ監査の方ではさらに、外から触れる経路を全部足した:
 
-合計 約 1,800 行のSwift + 100行のC。
+- **DX7SysExParser.swift** (120行) — iCloud/AirDrop経由で入ってくる怪しい .syx パーサ
+- **UserBankManager.swift** (90行) — fileImporter まわり
+- **MIDIInputManager.swift** (1,132行) — MIDI 2.0 UMP デコード、PE JSON
+- **PEResponderHost.swift** (374行) — Property Exchange responder
+- **USBResetHelper.c** (84行) — IOKit USB reset (macOS用)
 
-## ollama API の使い方
+合計で Swift が約1,800行、Cが100行。「変なバイト列を流し込まれたとき何が起きるか」を見て欲しい場所をひと通り。
 
-最初は `ollama run mistral` みたいに対話的に投げてたけど、長文プロンプトだとブロックバッファリングで進捗が出ないし、ANSIスピナー（`⠙ ⠹ ⠸`）が出力に混ざる事故が起きた。
+## 最初にハマった ollama の罠
 
-ちゃんとAPIを叩く形に切り替え:
+最初は雑に `ollama run mistral < prompt.md` みたいに流してた。これが地味に良くなくて、
+
+- 長文プロンプトだとブロックバッファリングで進捗が見えない
+- 端末のスピナー（`⠙ ⠹ ⠸`）が出力に混ざる事故が起きる
+- そして最大の問題: **`num_ctx` のデフォルトが 2048 トークン**
+
+最後のこれに気づくのに時間を食った。ファイル全体を貼ったつもりが「LLMが50行目以降を全く知らない」みたいな奇妙な挙動になって、しばらく「お前ホント賢くないな…」とか思ってたら自分が悪かった。
+
+ちゃんと API を叩く形に切り替え:
 
 ```python
 import json, urllib.request
@@ -50,7 +58,7 @@ body = json.dumps({
     "model": "mixtral:8x22b",
     "prompt": prompt,
     "stream": False,
-    "options": {"num_ctx": 40960}
+    "options": {"num_ctx": 40960}  # ← ここ
 }).encode()
 
 req = urllib.request.Request(
@@ -63,29 +71,34 @@ with urllib.request.urlopen(req, timeout=3600) as r:
     print(d["response"])
 ```
 
-`num_ctx` は要注意で、ollamaのデフォルトは2048。コードを大量に貼ると黙って後ろを切り捨てるので、ファイル全体を渡すなら **40k トークン以上明示的に指定**しないといけない。これに気づくまで「なぜLLMは50行目以降を読んでないのか」と悩んだ。
+`num_ctx` は使うモデルの最大値（mixtral なら 65k くらい）まで上げて良い。コードを貼って監査させるなら最低でも 32k 〜 40k は要る。
 
-## プロンプト設計
+## プロンプトをどう書いたか
 
-最初に渡したプロンプトは「DX7エンジンのバグを探して」程度のラフなもの。これだと「コメントを書け」「変数名を変えろ」みたいな bikeshedding が混ざる。改善:
+最初に渡した雑プロンプト（「DX7エンジンのバグを探して」）の出力は、`コメントを書け / 変数名を変えろ / もっと関数を分けろ` みたいな bikeshedding ばかりで、 *いや、そうじゃなくて…* と頭を抱えた。
 
-- **検証可能な観点に絞る**: 整数オーバーフロー、境界チェック、リアルタイムスレッド安全性
-- **出力フォーマットを固定**: 1行1 JSON、`severity / file / lines / title / what / symptom / fix_hint`
-- **PoCを要求**: 「攻撃者が送り込む具体的バイト列を書け」（書けないなら spec ulative なので drop）
-- **CWE番号を要求**: ハルシネーションかどうか即座に分かる
+なので絞った:
 
-セキュリティ監査の方はさらにスレットモデルを明文化した:
+- **検証可能な観点だけ** に限定 — 整数オーバーフロー、境界チェック、リアルタイムスレッド安全性
+- **出力フォーマットを固定** — 1行1 JSON、`severity / file / lines / title / what / symptom / fix_hint`
+- **PoC（concrete attacker payload）を要求** — 書けないなら spec ulative なので drop しろ、と命令
+- **CWE番号を要求** — 適当な番号を言ってきたらハルシネーションだと即わかる
+
+セキュリティ監査の方はさらに脅威モデルを明文化した:
 
 > Attacker can send arbitrary bytes via:
 > - SysEx files imported from iCloud Drive / AirDrop / Files app
 > - MIDI 2.0 UMP from any USB / Bluetooth / network MIDI device
 > - Property Exchange JSON-over-MIDI responses
 >
-> Goal: find vulnerabilities that lead to crash / memory corruption / arbitrary file write / DoS / info disclosure.
+> Goal: find vulnerabilities that lead to crash / memory corruption /
+> arbitrary file write / DoS / info disclosure.
 
-## Phase 1: バグ監査
+このくらい絞れば、それなりに役に立つ指摘が出てくるだろう、と思った。 *思っていた*。
 
-### 走らせたモデル
+## まずはバグ監査から
+
+走らせたのはこの10モデル:
 
 | モデル | サイズ | 実行時間 | findings | TP |
 |---|---|---|---|---|
@@ -100,27 +113,31 @@ with urllib.request.urlopen(req, timeout=3600) as r:
 | mixtral:8x22b | 79 GB | 2,139 s | 1 | 0 |
 | llama4:scout | 67 GB | – | – | 失敗 |
 
-\* 22,714 トークンの reasoning を吐いて結局JSON出力なし。  
+\* qwen3.6:35b は **2万2千トークンの reasoning** を吐いてから結局JSON 1行も出さずに終了。  
 llama4:scout は HTTP 500 で 0 byte。
 
-### 共通誤検出パターン
+検証は地道に手作業で、各 finding の引用行を実コードと突き合わせて、「本当にバグか / 行が実在するか」を一個ずつ見ていった。
 
-5モデル以上が独立に同じ誤指摘をしてきたパターンを並べる。
+41件の指摘を全部読んで、いくつかの**よく似たパターン**で間違えていることに気づいた。これが面白いのでパターン別に並べる。
 
-#### 1. `rawInc = (4 + (qrate & 3)) << (8 + (qrate >> 2))` を「整数オーバーフロー」と指摘
+### パターン1: クランプ済みの値に「overflow するぞ」と警告してくる
+
+DX7のEGの内部計算で、こういうコードがある:
 
 ```swift
 var qrate = (rate * 41) >> 6
-qrate = min(63, qrate + rateScaling)  // ← クランプ済
+qrate = min(63, qrate + rateScaling)  // ← 上限 63 でクランプしてる
 let rawInc = (4 + (qrate & 3)) << (8 + (qrate >> 2))
 inc = Int32((Int64(rawInc) * srMultiplier) >> 24)
 ```
 
-`qrate` は `min(63, ...)` で制限済み。最大値は `7 << 23 = 58M` で `Int32` に余裕で入る。さらに `Int64(rawInc) * srMultiplier` で安全に拡張してから `>> 24`。
+`qrate` は 63 に上限が貼ってある。ということは、最後のシフト幅は最大 `8 + 15 = 23` で、`(4+3) << 23 = 約 5800万`。Int32（約21億）の中にスッポリ収まる。さらに `Int64` に拡張してから掛け算してるので、本当に二重に守ってる。
 
-LLMは **直前の `min(63, ...)` を読み飛ばし**、`qrate >> 2` が「大きい値になりうる」という連想だけで指摘してくる。8B〜70Bのほぼ全モデルが同じハマり方をした。
+これを見て **8B〜70Bのほぼ全モデルが** 「`qrate >> 2` が大きい値になりうるので overflow します」と警告してきた。3行前の `min(63, ...)` を読んでない。70Bでもこのレベル、というのが正直一番ガッカリした。
 
-#### 2. Swift tuple を「ヒープ配列」と誤認
+### パターン2: Swift の tuple を「ヒープ確保された配列」と勘違いする
+
+これは結構ウケた:
 
 ```swift
 package struct DX7Voice {
@@ -130,46 +147,56 @@ package struct DX7Voice {
 }
 ```
 
-これを見た複数のモデル（特にhermes3:8b、gemma4:31b）の指摘:
+これに対して、複数のモデル（特に hermes3:8b や gemma4:31b）が:
 
-> "Array creation in real-time path. Array creation is a heavy operation
-> and must be avoided in the critical section of the real-time processing loop."
+> Array creation in real-time path. Array creation is a heavy operation
+> and must be avoided in the critical section of the real-time processing loop.
 
-Swiftの **tuple はスタック確保** で、Arrayとは全く別物。型シグネチャを丁寧に読まずに「6個並んでる→Array」と決めつけている。`@inline(__always)` で switch-case に展開してるホットパスを「冗長」とまで言ってきた。
+…と。**Swift の tuple はスタック確保**で、Array とは全然違う。「6個並んでる、配列だ」っていう連想だけで指摘してきてる。さらに `@inline(__always)` 付けて switch-case で展開してるホットパスを「冗長だから関数化しろ」とまで言われた。 *いや、だからわざわざ inline 展開してんだって…*
 
-#### 3. `&+` / `&-` を「未チェックなオーバーフロー」と指摘
+### パターン3: `&+` / `&-` を「未チェックなオーバーフロー」と取る
 
 ```swift
 level = level &- inc
 ```
 
-`&-` は Swift の **明示的wrap-around演算子**。固定小数点のラップは意図的な振る舞いで、`-` だとクラッシュさせるので使い分けてる。これを「underflow check が無い」と指摘してきたモデルが3つ。
+`&-` は **わざと wrap させる** Swift の演算子。固定小数点ロジックでは普通に使う。これを「underflow check が抜けてる」と指摘してきたモデルが3つ。 *いや、`-` でもよかったんだけど、わざわざ `&-` 書いてるのは「ラップして欲しいから」なんだよ…*
 
-#### 4. `min(algorithm, 31)` のクランプを見落とす
+### パターン4: 防御コードを綺麗に踏み越えていく
 
 ```swift
 let alg = kAlgorithmFlags[min(algorithm, 31)]
 ```
 
-これを「OOB read」と指摘するモデル（codestral:22b）。`min(_, 31)` はそのために書いた防御。
+`min(_, 31)` がついてるのに、これを「OOB アクセスの可能性あり」と書いてきた（codestral:22b）。 **その `min` 何のために書いたと思ってんのよ…**
 
-#### 5. DX7仕様で固定の32アルゴリズムを「ハードコード」と批判
+### パターン5: 仕様で固定されてるものを「ハードコード批判」してくる
+
+DX7のアルゴリズムは仕様で32種類に固定されてる。それを以下のように書いてある:
 
 ```swift
-public let kAlgorithmFlags: [(UInt8, UInt8, UInt8, UInt8, UInt8, UInt8)] = [...]
+public let kAlgorithmFlags: [(UInt8, UInt8, UInt8, UInt8, UInt8, UInt8)] = [
+    /* alg 1 */ (...),
+    /* alg 2 */ (...),
+    /* ...全32個... */
+]
 ```
 
-DX7のアルゴリズムは **仕様で固定32種**。変えたら DX7 ではなくなる。「動的生成すべき」みたいな提案は仕様無視。
+これに対して「動的生成すべき」と提案してくるモデルがいた。動的生成したら **DX7 じゃない別のシンセになっちゃう**。
 
-### つまり:
+### あと、行番号を平気で捏造する
 
-70Bクラスでも **存在しない行番号を引用してくる**。`llama3.3:70b` は `DX7Operator.swift L100-L120` を指摘してきたが、ファイルは85行しかない。`gemma3:12b` は `DX7Envelope.swift L192-L216` (実178行)、`mixtral:8x22b` は `DX7Voice.swift L364-L405` を `advanceStage` 関数として指摘 (実関数は L54-L95)。
+70Bでも安心できないのが、 **存在しない行番号を引用してくる** こと。
 
-## Phase 2: セキュリティ監査
+- `llama3.3:70b`: `DX7Operator.swift L100-L120` → ファイル全体で 85 行
+- `gemma3:12b`: `DX7Envelope.swift L192-L216` → 実 178 行
+- `mixtral:8x22b`: `DX7Voice.swift L364-L405` を `advanceStage` 関数として指摘 → 実関数は L54-L95（全然違う場所）
 
-スレットモデルを明文化、PoC を要求、CWE 番号を強制。観点を絞った分マシになるかと思った。
+「L300〜350」とか書いてあると、人間は「具体的だな、見にいくか」と思う。これがブラフだった、というのが何度もあった。**具体性 ≠ 正確性**。
 
-### 結果
+## 次にセキュリティ監査
+
+「バグ監査では言語仕様を読み違えるけど、セキュリティ観点なら多少マシになるんじゃ？」という淡い期待を抱えて、もう一度回した。
 
 | モデル | 実行時間 | findings | TP |
 |---|---|---|---|
@@ -179,40 +206,42 @@ DX7のアルゴリズムは **仕様で固定32種**。変えたら DX7 では�
 | llama3.3:70b | 1,903 s | 3 | 0 |
 | mixtral:8x22b | timeout (60min) | – | – |
 
-### qwen3:14b の「もっともらしい」3件
+**結果: TP 0件**。同じだった。
 
-#### F1: Path Traversal in UserBankManager (CWE-22)
+ただ、出てきた偽陽性は **「もっともらしさ」が一段上がった**。具体例を見ていく。
+
+### qwen3:14b が出した、もっともらしい3件
+
+#### Path Traversal (CWE-22)
 
 ```swift
 let filename = sourceURL.lastPathComponent
 let destURL = userBanksDirectory.appendingPathComponent(filename)
 ```
 
-PoC: `../etc/passwd.syx` というファイル名で arbitrary file write、と。
+「`../etc/passwd.syx` というファイル名で arbitrary file write 可能」と。
 
-**実態**: iOS/macOS のファイルシステムは **filename に `/` を含められない**。`URL.lastPathComponent` は単一コンポーネントのみ返すので、`../` は構造的に発生しない。`..` 単体だと `appendingPathComponent("..")` が親ディレクトリになるが、`copyItem` の dest が既存で失敗する。
+**実態**: iOS/macOS のファイルシステムは **filename に `/` を含められない**。`URL.lastPathComponent` も単一コンポーネントしか返さないので、`../` という構造を持ったファイル名は OS レイヤで存在しえない。理屈は完璧、でも前提が成立しない。
 
-**理屈は正しいが、iOS の OS レイヤで遮断済み。Exploit 不可。**
-
-#### F2: Symlink Follow in copyItem (CWE-59)
+#### Symlink Follow (CWE-59)
 
 ```swift
 try FileManager.default.copyItem(at: sourceURL, to: destURL)
 ```
 
-「シンボリックリンクを copyItem するとリンク先がコピーされて sandbox を超える」という指摘。
+「symlink を copyItem したらリンク先がコピーされて sandbox 越境」。これも一見正しそう。
 
 **実態**: Apple のドキュメント:
 
 > If srcURL is a symbolic link, this method copies the symbolic link, not the file.
 
-`copyItem` は **symlink を symlink としてコピーする**。リンク先を読みに行くわけではない。仮にリンク先を `Data(contentsOf:)` で読んだとしても、ユーザは fileImporter でそのリンクへのアクセス権を **既に明示的に付与している**。Sandbox 越境は発生しない。
+`copyItem` は **symlink を symlink としてコピー**する。リンクを辿らない。仮に辿ったとしても、ユーザは fileImporter で「そのファイルへのアクセス権」を**自分で明示的に付与してる**ので、sandbox 越境にならない。
 
-#### F3: Unbounded JSON Parsing → DoS (CWE-400)
+#### Unbounded JSON DoS (CWE-400)
 
-`MIDIInputManager.decodePEPayload` で巨大JSONをデコードすると DoS、と。
+「PEペイロードのJSONをサイズ制限なしでデコードしてるから、巨大JSONを送ったら DoS」。
 
-**実態**: 上流の `UMPSysEx8Assembler` / `UMPSysEx7Assembler` (MIDI2Kit) が `maxBufferSize: Int = 65536` を既定で設定済。SysEx は **64KB で打ち切り**。`decodePEPayload` まで届く時点で 64KB を超えていない。
+**実態**: 上流の MIDI2Kit (`UMPSysEx8Assembler` / `UMPSysEx7Assembler`) が `maxBufferSize: Int = 65536` をデフォルトで設定済。**SysEx は 64KB で打ち切られる**。`decodePEPayload` まで届く時点で既に頭打ち。
 
 つまり M2DX 側は:
 
@@ -221,11 +250,11 @@ try FileManager.default.copyItem(at: sourceURL, to: destURL)
 - iOS sandbox (security-scoped resource)
 - MIDI2Kit の maxBufferSize 64KB
 
-の **三重・四重で防御済み**。LLM はコードに書かれた局所的なパターンだけ見て、エコシステム全体の防御は認識できなかった。
+の **三重・四重の防御**でカバー済み。LLM は手元のファイルだけ見て指摘してくるので、「上流ライブラリと OS でどう守られてるか」を **全く考慮できない**。これがセキュリティ観点で一番効いてくる弱点だった。
 
-### codestral:22b は USBResetHelper.c に存在しないコードを捏造
+### codestral:22b は USBResetHelper.c に存在しないコードを「指摘」してくる
 
-USBResetHelper.c は IOKit を叩く 84 行の C で、`offset` / `endIndex` などの変数は **存在しない**。にもかかわらず:
+84行のシンプルなC（IOKit USB を叩くだけ）に対して、こう来た:
 
 ```json
 {
@@ -240,56 +269,62 @@ USBResetHelper.c は IOKit を叩く 84 行の C で、`offset` / `endIndex` な
 }
 ```
 
-PEGETリクエストはMIDI Property Exchange の用語で、IOKit USB と無関係。**他のファイルの記憶を混ぜて捏造**してる。10個中10個がこのレベル。
+`offset` も `endIndex` も **このファイルには存在しない**。`PEGET` リクエストは MIDI Property Exchange の用語で、IOKit USB と何の関係もない。 **他のファイルの記憶が混ざって、知らないコードを生成してる**。
 
-## なぜ失敗するのか
+そしてこのレベルの指摘が10個中10個。 *うーん…*
 
-3つの理由があると思う。
+## なぜ全敗したのか、自分なりの整理
+
+3つあると思う。
 
 ### 1. 防御コードを「読まない」
 
-LLMは「危険そうなパターン」を見つけるのは得意だが、その**直前直後にある防御コード**（`min`, `max`, `guard`, `clamping:`）を読み飛ばす傾向が顕著。`min(63, ...)` の3行先を見て「overflow可能」と判断する。
+LLMは「危険そうなパターン」（シフト演算、配列アクセス、文字列パース）を見つけるのは得意。でも **その3行前にある `min(63, ...)` や `guard data.count == ...`** を読み飛ばす。学習データの中に「危険なシフト演算 → overflow」というペアが大量にあって、それを引っ張ってきてるんだろう。**コンテキストの局所性**が低い。
 
 ### 2. 言語固有のセマンティクスが弱い
 
-- Swift tuple ≠ Array
-- `&+` / `&-` は意図的wrap
-- `Int32(clamping:)` は精度を失わない（飽和）
-- Dictionary subscript は Optional を返す（クラッシュしない）
+Swift はメジャー言語のはずだけど、ローカルLLMは細部で結構間違える:
 
-これらは Swift を知っていれば即座に分かるが、LLM は **「C/C++ から類推する」** のかこれらを誤認しがち。
+- **tuple ≠ Array**（heap allocation じゃない）
+- **`&+` / `&-`** は明示的wrap（チェックが「ない」のではなく「いらない」）
+- **`Int32(clamping:)`** は精度を失わない（飽和してくれる）
+- **Dictionary subscript** は Optional を返す（クラッシュしない）
 
-### 3. エコシステム全体を見ない
+C/C++ で覚えた感覚で類推してくる、と言うと当たってる気がする。
 
-`UMPSysEx8Assembler` の `maxBufferSize: 65536` は MIDI2Kit のソースを読まないと分からない。LLM はプロンプトに含まれていない依存先のコードを参照できないので、「上流で何が保証されているか」を考慮した監査ができない。
+### 3. プロンプトの外を見られない
 
-## 何が「向いていない」のか
+`UMPSysEx8Assembler` の `maxBufferSize: 65536` は MIDI2Kit のソースを開かないと分からない。ローカルLLMは依存先を grep する手段がないので、**「上流で何が保証されてるか」を加味した監査**ができない。
 
-「ローカル LLM は使い物にならない」という結論ではない。問題は **タスクとの相性**で、コード監査は特に厳しい:
+これは agent 化（grep/Read を投げ返せるツール）すれば改善するはずだけど、ollama 単体では無理。
 
-- **false positive が一つでも混ざると、残り全部の信頼が崩れる**: 50件の指摘の中から 1件の真のバグを掘り当てるより、最初から全部捨てた方が早い
-- **コードに書かれていない情報（依存ライブラリ、OS API のセマンティクス、言語仕様）に大きく依存する**: ローカル LLM はプロンプトの外を見ないので、ここで負ける
+## というわけで、向いてなかった
 
-逆に、ローカル LLM がローカルである意味があるのは:
+「ローカル LLM は使い物にならない」と言いたいわけではない。問題は **タスクとの相性** で、コード監査は特に厳しい組み合わせだった:
 
-- 完全オフラインの環境（飛行機・出張先）
+- false positive が一つでも混ざると、残り全部の信頼が崩れる。50件読んで1件のバグを掘り当てるより、最初から全部捨てた方が早い、になる
+- コードに書かれてない情報（依存ライブラリ、OS API のセマンティクス、言語仕様の細部）に重く依存する。ローカルLLMはここで決定的に負ける
+
+逆にローカルLLMが「ローカルである意味」が出るのは、
+
+- 完全オフライン環境（飛行機・出張先）
 - 外に出したくない短いメモや会話の要約
-- 概念説明・用語確認（ネット代わり）
+- 概念や用語のサクッと確認（ネット代わり）
 
-…くらいで、「OSS のレビューを夜中に走らせる」用途では、現時点では **何かしら別のアプローチを取った方がいい**。
+…くらいかな、というのが今のところの実感。「OSSのレビューを夜中に走らせたい」は、現時点では別アプローチを考えた方がいい。
 
 ## まとめ
 
-- ollama の num_ctx はデフォルト 2048。明示しないと黙って切り捨てる
-- ローカル LLM 10機種に同一プロンプトでバグ + セキュリティ監査 → **57 findings, TP 0**
-- 共通の失敗モード: 防御コード見落とし、言語セマンティクス（Swift tuple, `&+`）誤認、依存ライブラリ未参照、行番号の捏造
-- バグ監査・セキュリティ監査のような **false positive が許されない** タスクには現状の 70B〜141B でも厳しい
+- **ollama の num_ctx はデフォルト 2048** ← 最初にこれで嵌まった
+- ローカル LLM 10機種を回した結果、**累計 57 findings、TP は 0件**
+- 共通の失敗モード: 防御コードの見落とし、Swift セマンティクス（tuple, `&+`）の誤読、依存ライブラリ未参照、行番号の捏造
+- バグ監査やセキュリティ監査のような **「false positive が許されないタスク」** には、現状の70B〜141Bでも厳しい
 
-「コードの問題を勝手に見つけて issue 起票してくれる便利アシスタント」を期待してたなら、**今のローカル LLM ではまだ早い**。
+「コードの問題を勝手に見つけて issue 起票してくれる便利アシスタント」みたいなのを期待してたなら、 **今のローカル LLM ではまだ無理**、というのが結論。
 
 ---
 
-監査対象のM2DX-CoreはApache 2.0で公開しています。検証用のpromptと出力ログは `/tmp/m2dx-audit/` および `/tmp/m2dx-secaudit/` に残してあるので、別モデルで再走行して反証してくれる方がいたら歓迎です。
+監査対象の M2DX-Core は Apache 2.0 で公開している。検証用のプロンプトと出力ログも残してあるので、別モデルで再走行して反証してくれる方がいたら歓迎。
 
 - **M2DX-Core (OSS)**: https://github.com/hakaru/M2DX-Core
 - **M2DX (iOS app)**: https://apps.apple.com/jp/app/m2dx/id6753466996

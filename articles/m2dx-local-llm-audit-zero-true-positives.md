@@ -298,6 +298,79 @@ C/C++ で覚えた感覚で類推してくる、と言うと当たってる気�
 
 これは agent 化（grep/Read を投げ返せるツール）すれば改善するはずだけど、ollama 単体では無理。
 
+## というか、LLMはSwiftをそもそも知らない疑惑
+
+3つの理由のうち2番目を、もっと強い言い方で書き直したい。 **ローカル LLM は Swift をそんなに分かってない**。
+
+今回の誤検出の中身を眺め直すと、5パターンのうち3〜4つは「Swift 仕様の誤読」が原因になっている:
+
+- tuple `(A, A, A, A, A, A)` を **「ヒープに乗る配列」と判定** → "RT 安全性違反" と的外れな指摘
+- `&+` / `&-` を **「未チェックなオーバーフロー」と判定** → 明示的 wrap 演算子だと知らない
+- `Int32(clamping:)` を **「精度を失う truncation」と判定** → 飽和することを知らない
+- Dictionary subscript の Optional 戻りを **「OOB クラッシュ」と判定** → 安全な subscript 仕様を知らない
+- `min(_,31)` のクランプを **無視** → これは Swift というより読解の問題だが、組み合わさって悪化する
+
+70Bクラスでもこのレベル。 **C/C++/Java で覚えたパターンをそのまま当ててくる感じ**。これはモデルの「能力不足」というより、 **学習データの中の Swift 比率が薄い**のが本質だと思う:
+
+- GitHub 全体に占める Swift コードは Python / JS / Java / C++ より圧倒的に少ない
+- Apple 純正 SDK（Foundation、SwiftUI、AVFoundation の中身）は **クローズドソース**で学習データに入りにくい
+- Swift 5 → 6 で言語仕様が大きく動いた（concurrency、strict mode）ので、古い学習データで覚えた Swift は陳腐化しやすい
+- DSP、固定小数点、リアルタイム制約のような **「Apple アプリ寄りでない Swift コード」はさらに希少**
+
+つまり LLM の Swift 知識は「素朴な iOS アプリ部分は得意 / 言語の細部や非 GUI ドメインは弱い」というアンバランスな状態にある。今回の DX7 エンジン（固定小数点 DSP + リアルタイム制約 + Swift 6 strict concurrency）は、 *そのアンバランスの「弱い側」をモロに踏んでる*。
+
+## じゃあ、Swift をどうやって学習させる？
+
+「Swift も DSP も分かるローカル LLM」を手元で作るとしたら、ざっくり4択:
+
+### A. プロンプトに「Swift カンペ」を差し込む（一番安い）
+
+コードを貼る前に、こういう pre-amble を入れる:
+
+```text
+You are reviewing Swift 6 code with these conventions in mind:
+
+- Tuples like `(A, A, A)` are stack-allocated, NOT heap arrays.
+- `&+` / `&-` / `&*` are intentional wrap-around operators.
+  Absence of overflow check is by design, not a bug.
+- `Int32(clamping: x)` saturates instead of truncating.
+  No precision loss to flag.
+- `dict[key]` returns Optional, not crash. Verify before flagging
+  "OOB access".
+- `@inline(__always)` switch-case fan-outs are intentional hot-path
+  optimizations; do not flag as "redundant".
+
+When reviewing, verify each potential issue against these
+conventions before reporting.
+```
+
+これだけで「`&-` は overflow 未チェック」みたいな絶対的な誤検出は **ほぼ消えるはず**（未検証だけど効くと思う）。Claude Code の `CLAUDE.md` や aider の設定に書いておけば毎回同じ前提で走る。**コスパは抜群**。
+
+### B. RAG で Swift Book / Evolution を引かせる
+
+The Swift Programming Language Book と Swift Evolution proposals を chunked にしてベクトル DB に入れ、LLM が「`&+` の意味」みたいな疑問を持ったときに該当ページを retrieval する構成。中規模効果、中規模手間。LangChain か llama-index で2〜3日。
+
+### C. LoRA でファインチューニングする
+
+Mac Studio M3 Ultra 96GB だと **`mlx-lm` で 14B〜22B クラスの LoRA fine-tuning が現実的**。データの目安:
+
+- The Swift Programming Language Book + Swift Evolution（〜1000ページ）の Q&A 整形版
+- OSS の「言語の細部を踏んでる Swift コード」: swift-foundation、swift-collections、swift-numerics、AudioKit など
+- 自分の M2DX-Core / MIDI2Kit のコード（DSP / RT / Q24 固定小数点 のような **狭い知識**を埋め込む）
+- **誤検出 → 正解** の対照学習データ — 今回 57件溜まったので、「このコードの `&-` はバグではない、なぜなら…」というペアを LLM が出すべき形に整形して学習させる
+
+ベースは **qwen2.5-coder:14b** か **codestral:22b** あたり。GPU 時間で半日〜1日、データ作りに数日。 *DGX Spark を買う言い訳はここにある*。
+
+ただし、こうして特化モデルを作っても **agentic harness（依存先 grep + 行番号検証）は別軸**。Swift 知識を植え付けても、ツールの問題は別途解決する必要がある。
+
+### D. 待つ
+
+Apple が言語モデル特化版を出してくる、フロンティアが Swift 6 をもうちょっと真面目に学習してくれる、誰かが Swift 特化 LoRA を公開してくれる…のを待つ。一番省エネ。
+
+---
+
+個人開発の現実解としては、 **A（Swift カンペ）+ Claude Code でフロンティアを呼ぶ** が現状コスパ最強。LoRA は楽しいけど、データ整形と評価セット構築の労力対効用が個人だと厳しい。「Swift 特化ローカルモデル」は週末プロジェクトのテーマとしては最高だけど、 *本気でレビューを回したいなら A + Codex/Claude*。
+
 ## というわけで、向いてなかった
 
 「ローカル LLM は使い物にならない」と言いたいわけではない。問題は **タスクとの相性** で、コード監査は特に厳しい組み合わせだった:

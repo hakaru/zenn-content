@@ -1,5 +1,5 @@
 ---
-title: "M2DX — DX7-compatible FM Synthesizer with Full MIDI 2.0 UMP Support, Now in Public Beta"
+title: "M2DX — DX7-compatible FM Synthesizer with MIDI 2.0 UMP, Public Beta"
 emoji: "🎹"
 type: "tech"
 topics: ["ios", "midi", "swift", "synthesizer", "testflight"]

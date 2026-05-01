@@ -11,7 +11,7 @@ published: false
 iOS/macOS向けのMIDI 2.0 FM音源アプリ **M2DX** を開発中。 **TestFlight で公開ベータ配布中** → <https://testflight.apple.com/join/BAtGszPw> （試してフィードバックもらえると嬉しい）。心臓部の **M2DX-Core**（DX7互換エンジン、Pure Swift）はOSSで公開している。
 
 普段の開発支援は Claude Code と Codex を使ってるんだけど、欲しいのはリポジトリ全体を機械的に舐めて、夜中に勝手に走らせて朝起きたら issue が並んでる、みたいなレビューワーが欲しかった。手元には **Mac Studio M3 Ultra / 96GB**。70B〜141Bクラスのローカルモデルがちゃんと動くスペック。これ使えるでしょう。 ollama を立ち上げた。
-戦いの記録、長くなってしまい。さらにRAG、LoRAでモデルチューニングへ続く
+戦いの記録、長くなってしまい。さらに **RAG**（検索でプロンプトに知識注入）、 **LoRA**（モデル本体に小さなアダプタを足して微調整）でモデルチューニングへ続く
 
 結論❌
 
@@ -46,7 +46,7 @@ DX7エンジンの中核ファイル4つ:
 
 - 長文プロンプトだとブロックバッファリングで進捗が見えない
 - 端末のスピナーっていうらしい（`⠙ ⠹ ⠸`）みたいなやつが出力に混ざる。
-- そして最大の問題: **`num_ctx` のデフォルトが 2048 トークン**
+- そして最大の問題: **`num_ctx` のデフォルトが 2048 トークン** （`num_ctx` = LLM が一度に「見られる」プロンプト + 出力の合計トークン数の上限）
 
 ファイル食わしたつもりが「LLMが50行目以降を全く知らない」みたいな奇妙な挙動になって、お前ホント賢くないな…
 
@@ -83,7 +83,7 @@ with urllib.request.urlopen(req, timeout=3600) as r:
 - **検証可能な観点だけ** に限定 — 整数オーバーフロー、境界チェック、リアルタイムスレッド安全性
 - **出力フォーマットを固定** — 1行1 JSON、`severity / file / lines / title / what / symptom / fix_hint`
 - **PoC（concrete attacker payload）を要求** — 書けないなら spec ulative なので drop しろ、と命令
-- **CWE番号を要求** — 適当な番号を言ってきたらハルシネーションだと即わかる
+- **CWE番号を要求** — CWE は **Common Weakness Enumeration**（脆弱性タイプの番号付き分類カタログ。MITRE が運用、`CWE-22` = path traversal、`CWE-190` = integer overflow など）。適当な番号を言ってきたらハルシネーションだと即わかる
 
 セキュリティ監査の方はさらに脅威モデルを明文化した:
 
@@ -114,7 +114,7 @@ with urllib.request.urlopen(req, timeout=3600) as r:
 | mixtral:8x22b | 79 GB | 2,139 s | 1 | 0 |
 | llama4:scout | 67 GB | – | – | 失敗 |
 
-\* qwen3.6:35b は **2万2千トークンの reasoning** を吐いてから結局JSON 1行も出さずに終了。  
+\* qwen3.6:35b は **2万2千トークンの reasoning**（= モデル内部で「考えてる」過程の出力。普通の応答とは別枠で吐かれる長文）を吐いてから結局JSON 1行も出さずに終了。  
 llama4:scout は HTTP 500 で 0 byte。
 
 検証は地道に手作業で、各 finding の引用行を実コードと突き合わせて、「本当にバグか / 行が実在するか」を一個ずつ見ていった。
@@ -378,12 +378,12 @@ llama-index か LangChain で 2〜3 日。embedding は `bge-large` をローカ
 
 A と B は「推論時にプロンプトで何かを注入する」方向。C はそうじゃなくて、 **モデル本体の重みに Swift 知識を刻み込む**。
 
-Mac Studio M3 Ultra 96GB なら `mlx-lm` で 14B〜22B クラスの LoRA fine-tuning が普通に動く。学習データの構成案:
+Mac Studio M3 Ultra 96GB なら `mlx-lm` （Apple Silicon 向けの LLM 学習・推論ライブラリ。MLX 上で動く軽量実装）で 14B〜22B クラスの LoRA fine-tuning が普通に動く。学習データの構成案:
 
 - **The Swift Programming Language Book + Swift Evolution**（〜1000ページ）を Q&A 形式に整形
 - **OSS の「言語の細部を踏んでる Swift コード」**: swift-foundation、swift-collections、swift-numerics、AudioKit など
 - **自分の M2DX-Core / MIDI2Kit のコード**（DSP / RT / Q24 固定小数点 のような *狭くて深い*知識を埋め込む）
-- そして本記事のいちばん美味しい再利用先: **「誤検出 → 正解」の対照学習データ** — 今回集まった **52 件の false positive をそのまま DPO** に流す
+- そして本記事のいちばん美味しい再利用先: **「誤検出 → 正解」の対照学習データ** — 今回集まった **52 件の false positive をそのまま DPO** （= Direct Preference Optimization、「拒否すべき出力 / 望ましい出力」のペアで学習させる手法）に流す
 
 ```jsonl
 {
@@ -397,11 +397,11 @@ Mac Studio M3 Ultra 96GB なら `mlx-lm` で 14B〜22B クラスの LoRA fine-tu
 
 ベースは **qwen2.5-coder:14b** か **codestral:22b**。GPU 時間で半日〜1日、データ作りに数日。 *DGX Spark を買う言い訳がここにある*（けど、Mac Studio M3 Ultra で完結する見込み）。
 
-ただし、こうして特化モデルを作っても **agentic harness（依存先 grep + 行番号検証）は別軸の問題**で、これは harness 側で解決する必要がある。両方そろって初めて完璧な構成になる。
+ただし、こうして特化モデルを作っても **agentic harness**（= LLM に grep / Read / 編集ツールを持たせて、必要な情報を自分で取りに行かせる枠組み。Claude Code、Codex CLI、aider などが該当）**は別軸の問題**で、これは harness 側で解決する必要がある。両方そろって初めて完璧な構成になる。
 
 > **仮説 (C)**: Swift 系誤検出を 80% 以上削減 + プロンプト augmentation 不要  
 > **コスト**: データ整形 3-4 日 + GPU 6-24 時間 + 評価 1 日  
-> **副作用 (重要)**: 他言語の能力（Python, JS）が劣化していないかを **HumanEval-Python で常時測定**する必要あり  
+> **副作用 (重要)**: 他言語の能力（Python, JS）が劣化していないかを **HumanEval-Python**（= OpenAI 由来のコード生成ベンチ。164 問の Python 関数を pass@1 などで評価）**で常時測定**する必要あり  
 > **状態**: 📝 **spec ドキュメント完了、実装待ち**。`swift-audit-lora` という別プロジェクトとして切り出した
 
 
@@ -523,7 +523,7 @@ if let lastLevel = levels[safe: ix + 1] { ... }
 
 `levels` は `(Int, Int, Int, Int)` の tuple なので subscript できない。 *Swift tuple を Array と勘違いするやつ、refactor タスクでも普通に出てくる*。
 
-`mixtral:8x22b` (141B MoE、最大モデル) はもっと派手で、こんなコードを出してきた:
+`mixtral:8x22b` (141B MoE = Mixture of Experts。総パラメタ 141B のうち推論時は一部の "専門家" だけを使う仕組み、最大モデル) はもっと派手で、こんなコードを出してきた:
 
 ```swift
 newLevel = levelsArray[ix]  // ← let も var もない
@@ -634,7 +634,7 @@ while targetLevel == level {
 
 | 構成 | 精度の感触 | 例 |
 |---|---|---|
-| **Frontier model + agentic harness** | ◎ | Claude Code / Codex CLI / aider + GPT-5 / Claude Opus |
+| **Frontier model**（= 最新世代の最大級クローズドモデル）**+ agentic harness** | ◎ | Claude Code / Codex CLI / aider + GPT-5 / Claude Opus |
 | **ローカル中型 LLM + agentic harness** | ○ | aider や cline + qwen2.5-coder / codestral / llama3.3:70b |
 | ローカル大型 LLM 単発呼び出し ← **今回やったやつ** | × | ollama に 141B / 405B 投げて返事を待つ |
 | ローカル中型 LLM 単発呼び出し | × | ollama に 7B〜70B 投げて返事を待つ |

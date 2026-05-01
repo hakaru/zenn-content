@@ -8,7 +8,7 @@ published: false
 
 ## 夜中に勝手に働いてくれるレビューワー、欲しくない？
 
-iOS/macOS向けのMIDI 2.0 FM音源アプリ **M2DX** を開発中。心臓部の **M2DX-Core**（DX7互換エンジン、Pure Swift）はOSSで公開している。
+iOS/macOS向けのMIDI 2.0 FM音源アプリ **M2DX** を開発中。 **TestFlight で公開ベータ配布中** → <https://testflight.apple.com/join/BAtGszPw> （試してフィードバックもらえると嬉しい）。心臓部の **M2DX-Core**（DX7互換エンジン、Pure Swift）はOSSで公開している。
 
 普段の開発支援は Claude Code と Codex を使ってるんだけど、欲しいのはリポジトリ全体を機械的に舐めて、夜中に勝手に走らせて朝起きたら issue が並んでる、みたいなレビューワーが欲しかった。手元には **Mac Studio M3 Ultra / 96GB**。70B〜141Bクラスのローカルモデルがちゃんと動くスペック。これ使えるでしょう。 ollama を立ち上げた。
 戦いの記録、長くなってしまい。さらにRAG、LoRAでモデルチューニングへ続く

@@ -6,7 +6,7 @@ topics: ["llm", "ollama", "swift", "rag", "llamaindex"]
 published: false
 ---
 
-[前回記事](https://zenn.dev/hakaru/articles/m2dx-local-llm-audit-zero-true-positives)で、ローカル LLM 10 機種に DX7 エンジン（Pure Swift）のバグ監査をさせたら **累計 52 件の指摘 → 真陽性 0 件** という結果になった。
+[前回記事](https://zenn.dev/hakaru/articles/m2dx-local-llm-audit-zero-true-positives)で、ローカル LLM 10 機種に DX7 エンジン（Pure Swift）のバグ監査をさせたら **36 件の指摘 → 真陽性 0 件** という結果になった（セキュリティ監査 16 件を含めた全実験の累計は 52 件）。
 
 失敗の主原因は **Swift 言語仕様の誤読**だった:
 
@@ -131,8 +131,8 @@ v1 でも v2 (cheat sheet) でも一切出なかった種類の指摘が、RAG �
 |  | A (cheat sheet) | B (RAG) |
 |---|---|---|
 | 実装コスト | 低（プロンプトに数百トークン追加するだけ） | 中（chunk + embed + 検索パイプライン） |
-| Swift 系 FP 削減 | -75%（36→9件） | -76%（Swift 系に限れば同等） |
-| 総 findings 数 | **9件** | 31件 |
+| 総 findings 数 | **9件**（36→9, -75%） | 31件（36→31, -14%） |
+| Swift 系 FP 削減 | -76%（前回記事の結論） | -76% |
 | `&+` 誤検出の消え方 | 部分的（タイムアウトモデルあり） | **完全消滅** |
 | 周辺領域（Q16/Q24 等） | 効かない | 出てくる |
 | TP | 0 | 0 |

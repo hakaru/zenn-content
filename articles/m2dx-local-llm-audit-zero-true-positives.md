@@ -99,7 +99,7 @@ with urllib.request.urlopen(req, timeout=3600) as r:
 
 ## まずはバグ監査から
 
-走らせたのはこの10モデル（機種名は手元 ollama install のタグそのまま、世代混在は意図的 — `qwen3` と `qwen3.6`、`gemma3` と `gemma4`、`llama3.3` と `llama4` は別系統の別モデルで、8B〜141B の幅をカバーするためにわざと混ぜている）:
+走らせたのはこの10モデル（機種名は手元 ollama install のタグそのまま、世代混在は意図的 — `qwen3` と `qwen3.6`、`gemma3` と `gemma4`、`llama3.3` と `llama4` は別系統の別モデルで、8B〜141B の幅をカバーするためにわざと混ぜている）。表の `TP` 列は **真陽性 (true positive) = 実コードを照合して "本物のバグだった" と確認できた件数**:
 
 | モデル | サイズ | 実行時間 | findings | TP |
 |---|---|---|---|---|

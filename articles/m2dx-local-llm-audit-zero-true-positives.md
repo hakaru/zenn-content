@@ -1,5 +1,5 @@
 ---
-title: "ローカルLLM 10機種にDX7エンジンの監査をやらせたら、57件中ハズレ57件だった話"
+title: "ローカルLLMって本当に開発に使える？DX7エンジンの監査をやらせたら、57件中ハズレ57件だった話"
 emoji: "🤖"
 type: "tech"
 topics: ["llm", "ollama", "swift", "security", "codereview"]

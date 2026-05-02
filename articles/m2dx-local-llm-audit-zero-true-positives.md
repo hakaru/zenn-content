@@ -8,7 +8,9 @@ published: false
 
 ## 夜中に勝手に働いてくれるレビューワー、欲しくない？
 
-iOS/macOS向けのMIDI 2.0 FM音源アプリ **M2DX** を開発中。 **TestFlight で公開ベータ配布中** → <https://testflight.apple.com/join/BAtGszPw> （試してフィードバックもらえると嬉しい）。心臓部の **M2DX-Core**（DX7互換エンジン、Pure Swift）はOSSで公開している。
+iOS/macOS向けのMIDI 2.0 FM音源アプリ **M2DX** を開発中。TestFlight で公開ベータ配布中なので試してフィードバックもらえると嬉しい。心臓部の **M2DX-Core**（DX7互換エンジン、Pure Swift）はOSSで公開している。
+
+https://testflight.apple.com/join/BAtGszPw
 
 普段の開発支援は Claude Code と Codex を使ってるんだけど、欲しいのはリポジトリ全体を機械的に舐めて、夜中に勝手に走らせて朝起きたら issue が並んでる、みたいなレビューワーが欲しかった。手元には **Mac Studio M3 Ultra / 96GB**。70B〜141Bクラスのローカルモデルがちゃんと動くスペック。これ使えるでしょう。 ollama を立ち上げた。
 戦いの記録、長くなってしまい。さらに **RAG**（検索でプロンプトに知識注入）、 **LoRA**（モデル本体に小さなアダプタを足して微調整）でモデルチューニングへ続く
@@ -674,5 +676,6 @@ while targetLevel == level {
 
 監査対象の M2DX-Core は Apache 2.0 で公開している。検証用のプロンプトと出力ログも残してあるので、別モデルで再走行して反証してくれる方がいたら歓迎。
 
-- **M2DX-Core (OSS)**: https://github.com/hakaru/M2DX-Core
-- **M2DX (iOS app)**: https://apps.apple.com/jp/app/m2dx/id6753466996
+https://github.com/hakaru/M2DX-Core
+
+https://apps.apple.com/jp/app/m2dx/id6753466996

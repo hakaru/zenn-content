@@ -6,7 +6,9 @@ topics: ["llm", "ollama", "swift", "rag", "llamaindex"]
 published: false
 ---
 
-[前回記事](https://zenn.dev/hakaru/articles/m2dx-local-llm-audit-zero-true-positives)で、ローカル LLM 10 機種に DX7 エンジン（Pure Swift）のバグ監査をさせたら **36 件の指摘 → 真陽性 0 件** という結果になった（セキュリティ監査 16 件を含めた全実験の累計は 52 件）。
+https://zenn.dev/hakaru/articles/m2dx-local-llm-audit-zero-true-positives
+
+前回記事で、ローカル LLM 10 機種に DX7 エンジン（Pure Swift）のバグ監査をさせたら **36 件の指摘 → 真陽性 0 件** という結果になった（セキュリティ監査 16 件を含めた全実験の累計は 52 件）。
 
 失敗の主原因は **Swift 言語仕様の誤読**だった:
 
@@ -159,8 +161,8 @@ RAG は「Swift を知らない」という問題は実用レベルで解決で�
 
 ---
 
-実装は OSS として公開している:
+https://github.com/hakaru/swift-audit-rag
 
-- **swift-audit-rag**: https://github.com/hakaru/swift-audit-rag
-- **監査対象 M2DX-Core**: https://github.com/hakaru/M2DX-Core
-- **M2DX (iOS app)**: https://apps.apple.com/jp/app/m2dx/id6753466996
+https://github.com/hakaru/M2DX-Core
+
+https://apps.apple.com/jp/app/m2dx/id6753466996

@@ -87,6 +87,7 @@ lora_parameters:
 ```
 
 ```bash
+# v4 で実際に使ったパラメータ（scripts/train.sh のデフォルトとは異なる）
 mlx_lm.lora \
   --model Qwen/Qwen2.5-Coder-14B-Instruct \
   --fine-tune-type lora \
@@ -94,7 +95,8 @@ mlx_lm.lora \
   --batch-size 2 \
   --iters 300 \
   --learning-rate 5e-5 \
-  --max-seq-length 2048
+  --max-seq-length 2048 \
+  --config scripts/lora_config.yaml
 ```
 
 ### Yes/No バランス
@@ -129,7 +131,7 @@ Iter 200: Val 0.898  Train 0.035
 Iter 300: Val 0.977  Train 0.022
 ```
 
-Iter 100 以降は val loss が単調増加。87件の学習データに対して約1.1エポック（100 iter / (87/2)）でベストに達した。小データセットでは油断するとすぐ過学習する。
+Iter 100 以降は val loss が単調増加。87件の学習データ・バッチサイズ2で、100 iter は約2.3エポック（100 / (87/2)）に相当する。小データセットでは油断するとすぐ過学習する。
 
 ### GGUF 変換の落とし穴
 
@@ -189,6 +191,6 @@ mlx-lm 0.31.3 は DPO をサポートしない。`chosen` をアシスタント�
 
 ## まとめ
 
-手作業73件の DPO ペア + 早期停止 + yes/no バランス管理で、Swift コード監査の誤検知を 41件 → 3件（93%削減）に抑えた。大量の汎用データより、問題に直結した少数の高品質データが効く、という教訓を改めて確認した実験だった。
+手作業73件の SFTサンプル（Q&A 36件 + DPO由来 19件 + 実バグ 18件）+ 早期停止 + yes/no バランス管理で、Swift コード監査の誤検知を 41件 → 3件（93%削減）に抑えた。大量の汎用データより、問題に直結した少数の高品質データが効く、という教訓を改めて確認した実験だった。
 
 `Int32(clamping:)` の strong prior 問題はまだ残っており、DPO による続報を書く予定。

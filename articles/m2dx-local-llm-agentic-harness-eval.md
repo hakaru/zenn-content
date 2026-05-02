@@ -235,8 +235,6 @@ aider 方式は **単発より速いケースもある** (codestral)、**単発�
 
 ---
 
-実験スクリプト一式 + 全セッションのログ + チェック質問の回答フルテキストは `/Users/hakaru/DEVELOP/swift-audit-agentic/` に保管。別モデル / 別ツールで再走行して反証してくれる方がいたら歓迎。
-
 - 母体記事: <https://zenn.dev/hakaru/articles/m2dx-local-llm-audit-zero-true-positives>
 - **M2DX-Core (OSS)**: <https://github.com/hakaru/M2DX-Core>
 - **M2DX (TestFlight)**: <https://testflight.apple.com/join/BAtGszPw>

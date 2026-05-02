@@ -8,6 +8,14 @@ published: false
 
 https://zenn.dev/hakaru/articles/m2dx-local-llm-audit-zero-true-positives
 
+:::message
+**この記事の対象プロジェクト**
+
+- **M2DX** — iOS/macOS 向け MIDI 2.0 対応 DX7 互換 FM シンセサイザーアプリ。[TestFlight 公開ベータ](https://testflight.apple.com/join/BAtGszPw) で試せる
+- **M2DX-Core** — M2DX の DX7 互換エンジン部分。Pure Swift、Apache 2.0 で OSS 公開: [github.com/hakaru/M2DX-Core](https://github.com/hakaru/M2DX-Core)
+- **MIDI2Kit** — M2DX-Core が依存する Swift 製 MIDI 2.0 ライブラリ。SysEx の受信・バッファ管理・UMP デコードを担う。開発の経緯は[こちらの本](https://zenn.dev/books/midi2kit-development-journey/)にまとめてある
+:::
+
 前回記事で、ローカル LLM 10 機種に DX7 エンジン（Pure Swift）のバグ監査をさせたら **36 件の指摘 → 真陽性 0 件** という結果になった（セキュリティ監査 16 件を含めた全実験の累計は 52 件）。
 
 失敗の主原因は **Swift 言語仕様をわかってない**だった:

@@ -6,6 +6,14 @@ topics: ["llm", "ollama", "aider", "swift", "codereview"]
 published: false
 ---
 
+:::message
+**この記事の対象プロジェクト**
+
+- **M2DX** — iOS/macOS 向け MIDI 2.0 対応 DX7 互換 FM シンセサイザーアプリ。[TestFlight 公開ベータ](https://testflight.apple.com/join/BAtGszPw) で試せる
+- **M2DX-Core** — M2DX の DX7 互換エンジン部分。Pure Swift、Apache 2.0 で OSS 公開: [github.com/hakaru/M2DX-Core](https://github.com/hakaru/M2DX-Core)
+- **MIDI2Kit** — M2DX-Core が依存する Swift 製 MIDI 2.0 ライブラリ。SysEx の受信・バッファ管理・UMP デコードを担う。本記事では「上流ライブラリがどこまで守っているか」を検証する主役になる
+:::
+
 ## 前回のあらすじ
 
 ひと月前くらいに [ローカルLLMって本当に開発に使える？DX7エンジンの監査をやらせたら、全然だめでした。。](https://zenn.dev/hakaru/articles/m2dx-local-llm-audit-zero-true-positives) という記事を書いた。要点だけ:
@@ -52,6 +60,14 @@ aider は **(2) を狙い撃ち** できる。上流コードを文脈として�
 答えるには **MIDI2Kit のソースを実際に確認する** しかない。各モデルが (i) 正解する / (ii) 捏造する / (iii) "わからない" のどれを返すかが、参照軸が効いているかを見る判定指標になる。
 
 ## 正解
+
+:::message
+**MIDI2Kit のアーキテクチャ上の位置づけ**
+
+外部から届いた SysEx バイト列は、M2DX-Core のパーサーに直接渡されるわけではない。まず MIDI2Kit の `UMPSysEx7Assembler` / `UMPSysEx8Assembler` がバイト列を組み立て、`maxBufferSize` を超えた時点で弾く。M2DX-Core の `DX7SysExParser` に届くのはそこをくぐり抜けたものだけ。
+
+「M2DX-Core のコードだけ見ても防御の全体像は分からない」というのが、単発呼び出しの LLM が依存ライブラリを参照できないと詰む理由。
+:::
 
 先に答えを書いておく。MIDI2Kit のソースから:
 
@@ -241,7 +257,14 @@ aider 方式は **単発より速いケースもある** (codestral)、**単発�
 
 要するに、**aider は「捏造するモデル」を「実コードを引用するモデル」に変える** が、**真陽性を生み出す力は別問題**。前回記事の「ノイズは減らせるが、未発見のバグを掘り出す力にはならない」と同じパターンが、別の角度からも確認された形。
 
-本記事の続編 (RAG / LoRA で知識軸を直接攻める) は別プロジェクトで設計完了済 (`swift-audit-rag`, `swift-audit-lora`)、進捗が出たらまた書きます。
+:::message
+**シリーズの続き**
+
+知識軸（Swift 言語仕様の誤読）を攻める 2 本はすでに公開済:
+
+- [（２）RAG 編 — Swift 仕様をベクトル DB に入れたら誤検出が 76% 減った](https://zenn.dev/hakaru/articles/m2dx-local-llm-audit-rag)
+- [（４）LoRA 編 — Swift 監査の誤検知を 93% 削減した話](https://zenn.dev/hakaru/articles/swift-audit-lora-fp-reduction)
+:::
 
 ---
 

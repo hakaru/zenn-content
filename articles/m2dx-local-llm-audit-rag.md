@@ -10,7 +10,7 @@ https://zenn.dev/hakaru/articles/m2dx-local-llm-audit-zero-true-positives
 
 前回記事で、ローカル LLM 10 機種に DX7 エンジン（Pure Swift）のバグ監査をさせたら **36 件の指摘 → 真陽性 0 件** という結果になった（セキュリティ監査 16 件を含めた全実験の累計は 52 件）。
 
-失敗の主原因は **Swift 言語仕様の誤読**だった:
+失敗の主原因は **Swift 言語仕様をわかってない**だった:
 
 - `(A, A, A, A, A, A)` tuple を「ヒープ確保された Array」と判定 → "RT 安全性違反" と指摘
 - `&+` / `&-` を「未チェックなオーバーフロー」と判定（明示的 wrap 演算子だと知らない）
@@ -21,11 +21,9 @@ https://zenn.dev/hakaru/articles/m2dx-local-llm-audit-zero-true-positives
 
 > **B. RAG で Swift Book / Evolution を引かせる** — 公式仕様書をまるごと検索エンジンとして使い、コードの構文に応じて関連ページを動的に retrieval してプロンプトに差し込む
 
-これを実装して 9 モデルで走らせた記録。
+これを実装して 9 モデルでやってみる。
 
-## 何を作ったか
-
-`swift-audit-rag` というプロジェクト（Python、llama-index）。パイプラインはこう:
+## パイプライン
 
 ```
 [1] M2DX-Core の Swift ファイル
@@ -75,11 +73,11 @@ v1 と同じ 9 モデル、同じ M2DX-Core コード（DX7Envelope/Operator/Voi
 \*\* フォールトトレラント版でタイムアウト後も継続、結果は FAILED  
 † phi4 は markdown 形式で 6 件出力。JSON 抽出パイプラインでは 0 件扱い
 
-## 何が変わったか
+## 結果
 
 ### H1 ✅ — Swift セマンティクス系 FP が約 76% 削減
 
-v1 で観測した 5 系統の誤検出がこう変わった:
+v1 で観測した 5 系統の誤検出の変化:
 
 | v1 FP パターン | v1 件数 | v3 件数 |
 |---|---|---|
@@ -126,7 +124,7 @@ gemma4:31b と qwen3.6:35b が独立して、同じコード箇所を critical �
 
 v1 でも v2 (cheat sheet) でも一切出なかった種類の指摘が、RAG 注入によって出てきた。2 つの独立したモデルが同じ箇所を指摘したことは、単なるハルシネーションではなく retrieval コンテキストによる一貫した推論の結果と見られる。H3「B は自分が思いつかなかった誤読パターンにも効く」の部分確認として記録に値する。
 
-## A vs B の比較
+## Cheat Shhet方式　　　vs RAG の比較
 
 前回記事の A (cheat sheet) と今回の B (RAG) を並べると:
 
@@ -160,8 +158,6 @@ RAG は「Swift を知らない」という問題は実用レベルで解決で�
 - **Agentic harness**: grep/Read を LLM に持たせて依存ライブラリを参照させる。行番号捏造・上流ライブラリ未参照の問題はこちらで構造的に解決する
 
 ---
-
-https://github.com/hakaru/swift-audit-rag
 
 https://github.com/hakaru/M2DX-Core
 

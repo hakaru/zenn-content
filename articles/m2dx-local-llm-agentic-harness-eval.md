@@ -1,5 +1,5 @@
 ---
-title: "ローカルLLMに aider を被せたら、「1024」と捏造してた答えが「65536」に化けた話"
+title: "ローカルLLMって本当に開発に使える？（３）aiderを試してみる"
 emoji: "🛠️"
 type: "tech"
 topics: ["llm", "ollama", "aider", "swift", "codereview"]

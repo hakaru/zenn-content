@@ -560,6 +560,50 @@ return None
 
 テスト 2 件追加（`test_stage1_seeded_file_variant_matches`、`test_stage1_seeded_variant_does_not_match_unrelated_file`）、11/11 PASS。
 
+### Stage 2 定数チェックの誤検知修正
+
+v5 で Bug 1 が `medium` に下げられた原因は Stage 2 の近接矛盾チェックだった。finding テキストが `"guard checks bulkDumpSize (4104 bytes) but upstream caps at 65535"` という形式のとき、正しい値 `4104` が含まれているにもかかわらず、`65535` が近接しているだけで誤検知していた。
+
+**修正前の問題**：定数名の前後 60 文字以内に正しい値と**異なる**数値があれば severity を1段落とす。正しい値と別の数値が**両方**近くにある場合（= 定数値を把握したうえで別の数値と比較している）を誤って矛盾と判断する。
+
+**修正後**：近接した異常値を検出したとき、同じウィンドウ内に正しい値も存在するなら矛盾なしとみなす。
+
+```python
+for m in pattern.finditer(text):
+    n = int(m.group(1) or m.group(2))
+    if n != value and n > 0:
+        # 正しい値も同じ窓内にあれば hallucination ではない
+        window = text[max(0, m.start() - 60):m.end() + 60]
+        if re.search(r"\b" + re.escape(str(value)) + r"\b", window):
+            continue
+        return True
+```
+
+テスト 2 件追加：
+
+- `test_stage2_correct_value_alongside_other_number_no_conflict`：正しい `4104` と `65535` が共存 → downgrade しない
+- `test_stage2_wrong_value_without_correct_value_still_conflicts`：`65535` のみ（`4104` なし）→ downgrade する
+
+合計テスト数：13/13 PASS。
+
+---
+
+## 実コードレビュー（M2DX-Core）
+
+v6 を M2DX-Core の実コード（仕込みなし）に対して走らせた。対象ファイル 6 本。
+
+モデルが出力した finding：
+
+| ファイル | 指摘 | 判定 |
+|---|---|---|
+| `SynthEngine.swift` | `determineTargetSlots()` で `activeSlotCount` が 8 を超えると `appendTarget()` がサイレントに切り詰める（CWE-125 的 OOB） | **偽陽性** |
+
+**調査結果**：`activeSlotCount` は `TimbreMode.slotCount` からのみ設定される。`TimbreMode` は sealed enum で最大値は `.tx816 = 8`（`kMaxSlots = 8` と一致）。したがって `appendTarget()` の `default: return` には到達しない——現状のコードで OOB は不可能。
+
+加えて行番号も外れていた（モデル出力: L300-304、実際: L1027+）。
+
+今回の実コードレビューは **FP 1件、TP 0件**。仕込みバグテストで問題になった「no vulnerabilities」の過抑制ではなく、行番号 hallucination ＋ コードの誤読によるもの。`appendTarget` の `default: return` は現在デッドコードだが、将来 `TimbreMode` に 9+ スロットの case が追加されたときにサイレント切り詰めが発生するリスクはある。コメントで意図を明記しておくべき箇所ではある。
+
 ---
 
 ## まとめ
@@ -571,6 +615,8 @@ return None
 | LoRA v4（仕込みバグ検出） | ❌ 0/3 |
 | Track A v5（m2dx-reviewer:14b） | ✅ 2/3 合格 |
 | **Track A v6（RT-safety recall）** | **✅ 3/3 合格** |
+| Stage 2 validator 誤検知修正 | ✅ 修正済み（13/13 PASS） |
+| 実コードレビュー（M2DX-Core） | FP 1件（行番号 hallucination + コード誤読）、TP 0件 |
 
 **LoRA で「偽陽性を減らす」チューニングをすると「真陽性も消える」リスクがある。** v4 がその典型だった。
 
@@ -581,4 +627,4 @@ v5（m2dx-reviewer:14b）が 2/3 をクリアした決め手は2つだ。
 
 v6（m2dx-reviewer:14b）で 3/3 をクリアした決め手は**デュアル軸コントラスト訓練**だ。`upstream_capped: yes` を持ちながら RT-safety finding も持つペアを12件加えることで、バッファ安全性と RT スレッド安全性の独立性をモデルが学習した。
 
-実コードレビューでの次のステップは、M2DX-Core の未公開コードに対してこのモデルを実際に走らせ、FP 率の維持を確認することだ。
+実コードレビューでは FP 1件（行番号 hallucination ＋ コード誤読）、TP 0件だった。仕込みバグでは検出できた CWE-125 が、実コードでは到達不能なコードパスを誤って指摘した。seeded テストと実コードでは問題の性質が異なる——seeded は「削除された1行を見つける」だが、実コードは「届かない `default:` ブランチをリスクと誤認しない」が求められる。次のステップは、このような構造的 FP パターンをどう訓練で抑制するかだ。

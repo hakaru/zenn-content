@@ -25,7 +25,7 @@ published: false
 これを実測してみたのが本記事。
 
 :::message
-本記事はシリーズ 3 本立ての 3 本目です。2 本目 (RAG/LoRA で知識軸を攻める実験) は準備中のため、実験の順番の都合で先に公開しています。
+本記事はシリーズ 4 本立ての 3 本目です。2 本目 (RAG) はすでに公開、4 本目 (LoRA) も公開済みです。執筆時点では RAG/LoRA が準備中だったため、先に公開しました。
 :::
 
 :::message
@@ -79,9 +79,9 @@ M2DX で **信頼できない外部入力が触れる経路全部**:
 
 - `DX7SysExParser.swift` (120行) — iCloud Drive / AirDrop 経由の `.syx` パース
 - `UserBankManager.swift` (90行) — fileImporter まわり
-- `MIDIInputManager.swift` (1,132行) — MIDI 2.0 UMP デコード、PE JSON
+- `MIDIInputManager.swift` (1,132行) — MIDI 2.0 UMP（Universal MIDI Packet、MIDIの統一パケット形式）デコード、PE（Property Exchange、MIDI 2.0 の双方向プロパティ交換プロトコル）JSON
 - `PEResponderHost.swift` (374行) — Property Exchange responder
-- `USBResetHelper.c` (84行) — IOKit USB reset
+- `USBResetHelper.c` (84行) — IOKit（Apple の I/O ドライバフレームワーク）USB reset
 
 ### 比較セル (3 モデル × 2 方式 = 6 セル)
 

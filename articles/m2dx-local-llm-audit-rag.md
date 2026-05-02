@@ -46,11 +46,11 @@ https://zenn.dev/hakaru/articles/m2dx-local-llm-audit-zero-true-positives
 
 ### 埋め込みモデル
 
-`bge-large-en-v1.5` を Ollama でローカル実行（`ollama pull bge-large`）。外部 API に一切投げない。
+`bge-large-en-v1.5`（テキスト埋め込み専用モデル）を Ollama でローカル実行（`ollama pull bge-large`）。外部 API に一切投げない。
 
 ### chunk 設計
 
-markdown を H1/H2 境界で分割 → 400 文字を上限に再帰的に段落→行→ハードカット。bge-large の 512 トークン上限に収める。Swift Book + Evolution で約 8,000 chunk。
+markdown を H1/H2 境界で分割 → 400 文字を上限に再帰的に段落→行→ハードカット。bge-large の 512 トークン上限に収める。Swift Book + Evolution で約 8,000 chunk（分割ブロック）。
 
 ## 結果
 
@@ -73,9 +73,9 @@ v1 と同じ 9 モデル、同じ M2DX-Core コード（DX7Envelope/Operator/Voi
 \*\* フォールトトレラント版でタイムアウト後も継続、結果は FAILED  
 † phi4 は markdown 形式で 6 件出力。JSON 抽出パイプラインでは 0 件扱い
 
-## 結果
+## 結果の解釈
 
-### H1 ✅ — Swift セマンティクス系 FP が約 76% 削減
+### H1 ✅ — Swift セマンティクス系 FP（偽陽性）が約 76% 削減
 
 v1 で観測した 5 系統の誤検出の変化:
 
@@ -124,7 +124,7 @@ gemma4:31b と qwen3.6:35b が独立して、同じコード箇所を critical �
 
 v1 でも v2 (cheat sheet) でも一切出なかった種類の指摘が、RAG 注入によって出てきた。2 つの独立したモデルが同じ箇所を指摘したことは、単なるハルシネーションではなく retrieval コンテキストによる一貫した推論の結果と見られる。H3「B は自分が思いつかなかった誤読パターンにも効く」の部分確認として記録に値する。
 
-## Cheat Shhet方式　　　vs RAG の比較
+## Cheat Sheet方式 vs RAG の比較
 
 前回記事の A (cheat sheet) と今回の B (RAG) を並べると:
 

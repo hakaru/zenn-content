@@ -11,7 +11,7 @@ published: false
 
 - **M2DX** — iOS/macOS 向け MIDI 2.0 対応 DX7 互換 FM シンセサイザーアプリ。[TestFlight 公開ベータ](https://testflight.apple.com/join/BAtGszPw) で試せる
 - **M2DX-Core** — M2DX の DX7 互換エンジン部分。Pure Swift、Apache 2.0 で OSS 公開: [github.com/hakaru/M2DX-Core](https://github.com/hakaru/M2DX-Core)
-- **MIDI2Kit** — M2DX-Core が依存する Swift 製 MIDI 2.0 ライブラリ。SysEx の受信・バッファ管理・UMP デコードを担う。本記事では「上流ライブラリがどこまで守っているか」を検証する主役になる
+- **MIDI2Kit** — M2DX-Core が依存する Swift 製 MIDI 2.0 ライブラリ。SysEx の受信・バッファ管理・UMP デコードを担う。本記事では「上流ライブラリがどこまで守っているか」を検証する主役になる。開発の経緯は[こちらの本](https://zenn.dev/books/midi2kit-development-journey/)にまとめてある
 :::
 
 ## 前回のあらすじ
@@ -62,7 +62,7 @@ aider は **(2) を狙い撃ち** できる。上流コードを文脈として�
 ## 正解
 
 :::message
-**MIDI2Kit のアーキテクチャ上の位置づけ**
+**[MIDI2Kit](https://zenn.dev/books/midi2kit-development-journey/) のアーキテクチャ上の位置づけ**
 
 外部から届いた SysEx バイト列は、M2DX-Core のパーサーに直接渡されるわけではない。まず MIDI2Kit の `UMPSysEx7Assembler` / `UMPSysEx8Assembler` がバイト列を組み立て、`maxBufferSize` を超えた時点で弾く。M2DX-Core の `DX7SysExParser` に届くのはそこをくぐり抜けたものだけ。
 

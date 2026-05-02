@@ -16,30 +16,38 @@ published: false
 
 その記事の最後で、解決策として 4 象限マトリクスを描いた:
 
-| | **単発呼び出し** | **+ agentic harness** |
+| | **単発呼び出し** | **+ aider などのツール** |
 |---|---|---|
-| **Frontier** (GPT-5 / Claude Opus) | – | ◎ Claude Code / Codex CLI |
+| **商用最新モデル** (GPT-5 / Claude Opus) | – | ◎ Claude Code / Codex CLI |
 | **ローカル中型** | × ← 前回やったやつ | **○ ← 本記事で検証** |
 
 「ローカル中型 LLM に grep / read ツールを持たせたら、単発呼び出しから **どこまで** 改善するのか?」  
 これを実測してみたのが本記事。
 
+:::message
+**aider とは**
+
+aider は、ターミナルで動くコード編集アシスタント。LLM に「ファイルを読む・コードを検索する・変更を提案する」といったツールを持たせ、「調べる → 考える → 修正する」のサイクルを自律的に繰り返させる。通常の API 呼び出しでは LLM はプロンプトに書いた内容しか見られないが、aider 経由だとリポジトリを grep したり関連ファイルを読み込んで答えたりできる。
+
+こうした「LLM にツールを持たせて自律的に動かす仕組み」全般を "agentic harness" と呼ぶ。aider のほか Codex CLI や Claude Code も同じ仕組み。本記事では aider 一本で試す。
+:::
+
 ## 何を測りたいのか
 
 前回観測した失敗パターンは大きく 2 種類に分けられる:
 
-1. **knowledge axis** — Swift tuple ≠ Array 誤認、`&+`/`&-` の wrap 演算子セマンティクス、DX7 ドメイン知識など。これはモデルの素の能力で、cheat sheet / RAG / LoRA で対処する別軸 (前回記事の続編 B / C 案)
-2. **capability axis** — 「**プロンプトの外を見られない**」ことに起因。依存ライブラリ未参照、行番号の捏造など
+1. **知識軸** — Swift の言語仕様や DX7 ドメインの知識がモデルに入っているかどうか。`tuple ≠ Array`、`&+`/`&-` は意図的なラップ演算子、DX7 の固定小数点表現など。これはモデルの素の能力で、cheat sheet / RAG / LoRA で対処する別軸 (前回記事の続編 B / C 案)
+2. **参照軸** — プロンプトに書かれていない外部コードを自分で取りに行けるかどうか。依存ライブラリを見ずに答える、存在しない行番号を引用するなど、「プロンプトの外を見られない」ことが根本原因
 
-agentic harness は **(2) を狙い撃ち**できる。grep / read で上流コードに触れられるなら、「知らないなら捏造」を「実コードを引いて答える」に変えられるはず。
+aider は **(2) を狙い撃ち** できる。grep / read で上流コードに触れられるなら、「知らないなら捏造」を「実コードを引いて答える」に変えられるはず。
 
-これを定量化するために、**コントロール質問** を仕込んだ:
+これを定量化するために、**チェック用質問** を仕込んだ:
 
-> Q: `DX7SysExParser` に届く前に、SysEx のバイト数は upstream で cap されているか? されているなら **どのファイル / 何行目 / 上限値**を答えよ。
+> Q: `DX7SysExParser` に届く前に、SysEx のバイト数は上流ライブラリで制限されているか? されているなら **どのファイル / 何行目 / 上限値** を答えよ。
 
-答えるには **MIDI2Kit のソースを実際に grep する**しかない。各モデルが (i) 正解する / (ii) 捏造する / (iii) "わからない" のどれを返すかが、capability axis の binary signal になる。
+答えるには **MIDI2Kit のソースを実際に grep する** しかない。各モデルが (i) 正解する / (ii) 捏造する / (iii) "わからない" のどれを返すかが、参照軸が効いているかを見る判定指標になる。
 
-## 正解 (ground truth)
+## 正解
 
 先に答えを書いておく。MIDI2Kit のソースから:
 
@@ -57,13 +65,13 @@ guard newSize <= maxBufferSize else { ... }
 `UMPSysEx8Assembler.swift` も同じく `maxBufferSize: Int = 65536` がデフォルト。  
 つまり **64 KB で打ち切り**。これより大きい SysEx は MIDI2Kit のレイヤで弾かれて、`DX7SysExParser` まで届かない。
 
-これが "正解" の数字。各モデルがこれをどう答えるか見ていく。
+各モデルがこの「65536」をどう答えるか見ていく。
 
 ## 実験設計
 
 ### 監査対象 (1,800 行)
 
-M2DX で **untrusted な外部入力が触れる経路全部**:
+M2DX で **信頼できない外部入力が触れる経路全部**:
 
 - `DX7SysExParser.swift` (120行) — iCloud Drive / AirDrop 経由の `.syx` パース
 - `UserBankManager.swift` (90行) — fileImporter まわり
@@ -71,36 +79,36 @@ M2DX で **untrusted な外部入力が触れる経路全部**:
 - `PEResponderHost.swift` (374行) — Property Exchange responder
 - `USBResetHelper.c` (84行) — IOKit USB reset
 
-### 比較セル (3 モデル × 2 mode = 6 セル)
+### 比較セル (3 モデル × 2 方式 = 6 セル)
 
-| | **aider** (= ollama + grep/read 可能) | **single-shot** (= ollama API 単発) |
+| | **aider あり** (grep/read 可能) | **単発呼び出し** (ollama API 直接) |
 |---|---|---|
 | **codestral:22b** | ✅ 走行 | ✅ 走行 |
 | **qwen2.5-coder:14b** | ✅ 走行 | ✅ 走行 |
 | **llama3.3:70b** | ✅ 走行 | ✅ 走行 |
 
-aider は `OPENAI_BASE_URL=http://localhost:11434/v1` で ollama を OpenAI 互換 endpoint として叩く。MIDI2Kit のソースを `--read` で渡し、agent が必要なら参照できるようにした。
+aider は `OPENAI_BASE_URL=http://localhost:11434/v1` で ollama を OpenAI 互換 endpoint として叩く。MIDI2Kit のソースを `--read` で渡し、モデルが必要なら参照できるようにした。
 
-両 mode で **同じ prompt** (Swift 6 conventions の cheat sheet + 脅威モデル + コントロール質問 + 出力フォーマット) を使う。違うのは「上流ソースに access できるか」だけ。
+両方式で **同じプロンプト** (Swift 6 の注意事項 + 脅威モデル + チェック質問 + 出力フォーマット) を使う。違うのは「上流ソースにアクセスできるか」だけ。
 
 ## 結果
 
-| モデル | mode | findings | control_Q answer | OK? | 時間 |
+| モデル | 方式 | 指摘数 | チェック質問の回答 | 正解? | 時間 |
 |---|---|---|---|---|---|
-| codestral:22b | aider | 4 | **65536** (MIDI2Kit, 名前微妙誤) | ✅ | 179s |
-| codestral:22b | single-shot | 8 | **1024** | ❌ **捏造** | 306s |
-| qwen2.5-coder:14b | aider | 4 | **65535** (1 off, guard 境界の解釈) | ≈ | 430s |
-| qwen2.5-coder:14b | single-shot | 0 ("no vulns") | **65536** | ✅ | 95s |
-| llama3.3:70b | aider | 5 | **4104** (parser layer の別 cap) | ✅ valid | 548s |
-| llama3.3:70b | single-shot | 1 | **4104** | ✅ | 295s |
+| codestral:22b | aider あり | 4 | **65536** (ファイル名が微妙にずれ) | ✅ | 179s |
+| codestral:22b | 単発 | 8 | **1024** | ❌ **捏造** | 306s |
+| qwen2.5-coder:14b | aider あり | 4 | **65535** (guard 境界の 1 ずれ) | ≈ | 430s |
+| qwen2.5-coder:14b | 単発 | 0 ("no vulns") | **65536** | ✅ | 95s |
+| llama3.3:70b | aider あり | 5 | **4104** (パーサー層の別上限) | ✅ 実在する値 | 548s |
+| llama3.3:70b | 単発 | 1 | **4104** | ✅ | 295s |
 
-**真陽性 (TP) は 6 セルとも 0** — quick scan の段階で全 22 件は path-traversal (iOS は `/` 不可で防御済) / IOKit memory leak の誤読 / JSON DoS の上流済 cap などの既知 FP パターンに帰着。詳細な finding-by-finding の TP/FP 分類は次回に持ち越し。
+**真陽性はどのセルも 0** — 速報スキャンの時点で全 22 件は、iOS パス構造で構造的に不可能な path traversal / IOKit のリリース忘れ誤読 / JSON DoS の上流キャップ済み などの既知の誤指摘パターンに帰着。指摘ひとつひとつの詳細な TP/FP 分類は次回に持ち越し。
 
 ## ハイライト #1: codestral の捏造が事実に化けた
 
 ここが本記事のいちばんの収穫。
 
-### single-shot で codestral が言ったこと
+### 単発呼び出しで codestral が言ったこと
 
 ```
 upstream_capped: yes
@@ -119,20 +127,20 @@ upper_bound_bytes: 1024
 upstream_capped: yes
 evidence_file: MIDI2Kit/Sources/MIDI2Core/UMP/SysEx7Assembler.swift  ← UMP プレフィクス抜け
 evidence_line: 108-113  ← 実際は L41 / L77、ずれている
-upper_bound_bytes: 65536 (maxPacketSize)  ← 数字は正解 (名前は maxBufferSize が正)
+upper_bound_bytes: 65536 (maxPacketSize)  ← 数字は正解 (変数名は maxBufferSize が正)
 ```
 
-ファイル名と行番号は依然ガタガタだが、 **数字 65536 は正解**。実コードに存在する value で、actual cap を当てている。
+ファイル名と行番号は依然ガタガタだが、 **数字 65536 は正解**。実コードに存在する値で、実際の上限を当てている。
 
-つまり: 
-- single-shot → 自信満々に嘘
-- aider → 細部はズレるが本質を当てる
+つまり:
+- 単発 → 自信満々に嘘
+- aider あり → 細部はズレるが本質を当てる
 
-**同じモデル / 同じプロンプト**で、harness の有無だけでこれが起きた。これが capability axis の効きの直接観察。
+**同じモデル / 同じプロンプト**で、aider の有無だけでこれが起きた。これが参照軸の効きの直接観察。
 
 ## ハイライト #2: qwen14b は単発でも答えられた
 
-ここで予想外。**qwen2.5-coder:14b の single-shot は 65536 を当てた**。
+ここで予想外の結果。**qwen2.5-coder:14b の単発呼び出しは 65536 を当てた**。
 
 ```
 upstream_capped: yes
@@ -141,17 +149,17 @@ evidence_line: L53-L61
 upper_bound_bytes: 65536
 ```
 
-しかも MIDI2Kit のソースを与えていないのに。「学習データに MIDI2Kit が含まれていた」「typical な Swift MIDI ライブラリの default を推測した」のいずれかだろう。
+MIDI2Kit のソースを与えていないのに。「学習データに MIDI2Kit が含まれていた」「Swift の MIDI ライブラリの典型的なデフォルト値を推測した」のいずれかだろう。
 
-つまり capability axis の効きは **モデル依存**。
-- 弱いモデル (codestral) → harness で救われる
+つまり参照軸の効きは **モデル依存**:
+- 弱いモデル (codestral) → aider で救われる
 - 強いモデル (qwen14b, llama70b) → 単発でも答えられる
 
-「agentic harness を被せれば全部解決する」ではない。 *「捏造する素質のあるモデルが harness 経由なら捏造しなくなる」* という防御的な効果。
+「aider を被せれば全部解決する」ではない。 *「捏造する傾向のあるモデルが aider 経由なら捏造しなくなる」* という防御的な効果。
 
-## ハイライト #3: llama70b は別レイヤの cap を発見
+## ハイライト #3: llama70b は別レイヤの上限を発見
 
-llama3.3:70b は両 mode とも `4104` と答えた。これは MIDI2Kit の 65536 とは違うが、**別レイヤで実在する valid な cap**:
+llama3.3:70b は両方式とも `4104` と答えた。これは MIDI2Kit の 65536 とは違うが、**別レイヤで実在する有効な上限値**:
 
 ```swift
 // DX7SysExParser.swift, L19-L30
@@ -163,71 +171,71 @@ public static func parse(data: Data, ...) -> DX7SysExBank? {
 }
 ```
 
-DX7 の 32-voice bulk dump は厳密に 4104 バイトで、これに合わない data は **parser 自身が即 reject** する。なので攻撃者が大きい SysEx を送っても、MIDI2Kit (64KB) を抜けたとしても、parser でさらに 4104 で落とされる。
+DX7 の 32-voice bulk dump は厳密に 4104 バイトで、これに合わない data は **パーサー自身が即 reject** する。つまり攻撃者が大きい SysEx を送っても、MIDI2Kit (64KB) をすり抜けたとしても、パーサーでさらに 4104 で弾かれる。
 
-Llama70b は **この内側の防御を発見**した。ground truth から見れば不正解 (control 質問は upstream cap を聞いた) だが、**本物の防御層を citing したという意味では FP ではない**。
+llama70b は **この内側の防御を発見した**。チェック質問が求めた「上流ライブラリでのキャップ」とは違うが、**本物の防御層を引用したという意味では誤りではない**。
 
-ground truth が一意でないのは control 質問の reflexive な弱点 — 改善余地。
+「正解が一意でない」というのはチェック質問自体が内包する問題点で、改善の余地がある。
 
-## ハイライト #4: harness は output を "誘発" する
+## ハイライト #4: aider は指摘を「引き出す」
 
-findings 数を mode 別に並べると:
+指摘数を方式別に並べると:
 
-| | aider | single-shot |
+| | aider あり | 単発 |
 |---|---|---|
 | codestral | 4 | 8 |
 | qwen14b | **4** | **0** ← "no vulnerabilities" |
 | llama70b | 5 | 1 |
 
-**aider 経路は findings 数がほぼ一定 (4-5)**、single-shot は **0 〜 8 と大きく振れる**。
+**aider 方式は指摘数がほぼ一定 (4〜5)**、単発方式は **0 〜 8 と大きく振れる**。
 
-特に qwen14b は single-shot だと「no vulnerabilities」で完全沈黙、aider 入れると 4 件出してきた。 **harness がモデルに「探せ」「JSON で答えろ」を強制している**形が見える。
+特に qwen14b は単発だと「脆弱性なし」と完全に黙るが、aider を入れると 4 件出してきた。 **aider がモデルに「探せ」「JSON で答えろ」を繰り返しやらせることで、指摘を引き出している**形が見える。
 
-これは TP 率の改善とは別軸の効果。 *findings が多いほど良いわけではない (qwen14b の 4 件もどうせ FP)*、けど "黙りっぱなしのモデル" を「とりあえず output させる」効果は確実にある。
+これは真陽性率の改善とは別の効果。指摘が多いほど良いわけではない (qwen14b の 4 件もどうせ誤指摘) けど、「黙りっぱなしのモデルを動かす」効果は確実にある。
 
-## ハイライト #5: TP 率は依然 0
+## ハイライト #5: 真陽性は依然 0
 
-前回の累計 52 件 TP 0 が、本実験で aider mode 13 件 + single-shot 9 件 = 計 22 件追加されて、**累計 74 件 / TP 0 件**。
+前回の累計 52 件・真陽性 0 件が、本実験で aider あり 13 件 + 単発 9 件 = 計 22 件追加されて、**累計 74 件 / 真陽性 0 件**。
 
-agentic harness で **capability axis (上流参照能力) は向上**したが、**knowledge axis (Swift / DX7 ドメインの言語的理解)** は別軸で、harness だけでは TP > 0 に届かない。
+aider で **参照軸 (上流ライブラリを実際に見る能力) は向上** したが、**知識軸 (Swift / DX7 ドメインの言語的な理解)** は別の問題で、aider だけでは真陽性には届かない。
 
-主な FP パターンも前回と同じ:
-- iOS の `lastPathComponent` で `/` が含まれる前提の path traversal (構造的に不可能)
-- `FileManager.copyItem` の symlink follow (Apple は symlink を symlink としてコピーする)
-- IOKit IOService のリリース忘れ指摘 (実コードは全パスで release してる)
-- JSON DoS (上流 MIDI2Kit で 64 KB cap 済)
+主な誤指摘パターンも前回と同じ:
+- iOS の `lastPathComponent` に `/` が含まれる前提の path traversal (iOS の構造上あり得ない)
+- `FileManager.copyItem` の symlink 追従 (Apple はシンボリックリンクをリンクとしてコピーする)
+- IOKit IOService のリリース忘れ指摘 (実コードは全分岐で release している)
+- JSON DoS (上流 MIDI2Kit で 64 KB 制限済み)
 
-→ **agentic harness で「ある種のクラスの FP は防げるが、別のクラスの FP には効かない」** が本実験で観測された境界。
+→ **aider で「ある種の誤指摘は防げるが、別の種類の誤指摘には効かない」** という境界が本実験で観測された。
 
 ## 時間
 
-| | aider | single-shot |
+| | aider あり | 単発 |
 |---|---|---|
 | codestral:22b | 179s | 306s |
 | qwen14b | 430s | 95s |
 | llama70b | 548s | 295s |
 
-aider mode は **単発より速いケースもある** (codestral)、 *単発より遅いケースもある* (qwen14b)、傾向は一貫しない。aider が repo-map 構築・ファイル読み込み・LLM 呼び出しを内部で何度するかにも依存。
+aider 方式は **単発より速いケースもある** (codestral)、**単発より遅いケースもある** (qwen14b)、傾向は一定しない。aider 内部でのリポジトリマップ構築・ファイル読み込み・LLM 呼び出しの回数にも依存。
 
-ちなみに aider は `--no-stream` で動かし、`--read` で MIDI2Kit を渡しているが、本実験のセッションで明示的な grep tool calls は transcript に観測されなかった。aider は `--read` で同梱した context を **モデルが必要に応じて見る**だけで、能動的なツール呼び出しは起きていなかった可能性が高い。
+ちなみに aider は `--no-stream` で動かし、`--read` で MIDI2Kit を渡しているが、本実験のセッションで明示的なファイル検索ツールの呼び出しはログに観測されなかった。aider は `--read` で同梱したファイルをモデルが必要に応じて読む形であり、能動的な grep ループは起きていなかった可能性が高い。
 
-つまり今回観測した「capability axis 改善」は **本格的な agent loop ではなく、`--read` 同梱コンテキストの効果**かもしれない。次の実験では、より能動的な agent (Codex CLI / Claude Code を frontier 比較として) を試したい。
+つまり今回観測した「参照軸の改善」は、**本格的な自律ループではなく `--read` で事前に渡したコンテキストの効果** かもしれない。次の実験では、より能動的なエージェント (Codex CLI / Claude Code を上位比較として) を試したい。
 
 ## まとめ
 
-- **agentic harness は capability axis を構造的に改善する**: codestral の "1024" hallucination が aider 経由で "65536" に化けた
-- ただし **モデル依存**: qwen14b と llama70b は単発でも捏造せず、ground truth に近い答えを出した
-- harness の副次効果: **モデルに output を誘発**する (qwen14b 0件 → 4件)
-- **TP 率は依然 0** (累計 74 件、全 FP) — knowledge axis の壁は harness では突破できない
-- "夜中に走らせるレビューワー" としての実用性: **capability axis ✓ / knowledge axis × → 全体評価は依然 frontier + harness が必要**
+- **aider は参照軸を構造的に改善する**: codestral が単発で "1024" と捏造していた答えが、aider 経由で "65536" に化けた
+- ただし **モデル依存**: qwen14b と llama70b は単発でも捏造せず、正解に近い答えを出した
+- 副次効果: **黙りっぱなしのモデルを動かす** (qwen14b 0件 → 4件)
+- **真陽性は依然 0** (累計 74 件、全誤指摘) — 知識軸の壁は aider では突破できない
+- "夜中に走らせるレビューワー" としての実用性: **参照軸 ✓ / 知識軸 × → 全体評価は依然、商用最新モデル + aider が必要**
 
-要するに、 **harness は弱いモデルを「捏造しないモデル」に変える** が、 **TP を生み出す力は別軸**。前回記事の「ノイズは減らせるが、未発見のバグを掘り出す力にはならない」と同じパターンが、別の角度からも確認された形。
+要するに、**aider は「捏造するモデル」を「実コードを引用するモデル」に変える** が、**真陽性を生み出す力は別問題**。前回記事の「ノイズは減らせるが、未発見のバグを掘り出す力にはならない」と同じパターンが、別の角度からも確認された形。
 
-本記事の続編 (RAG / LoRA で knowledge axis を直接攻める) は別プロジェクトで spec 完了済 (`swift-audit-rag`, `swift-audit-lora`)、進捗が出たらまた書きます。
+本記事の続編 (RAG / LoRA で知識軸を直接攻める) は別プロジェクトで設計完了済 (`swift-audit-rag`, `swift-audit-lora`)、進捗が出たらまた書きます。
 
 ---
 
-実験のスクリプト一式 + 全 transcript + control_Q 解答のフルテキストは `/Users/hakaru/DEVELOP/swift-audit-agentic/` に保管。母体記事の検証用 prompt と output ログは `/tmp/m2dx-audit/` および `/tmp/m2dx-audit-v2/` 。別モデル / 別 harness で再走行して反証してくれる方がいたら歓迎。
+実験スクリプト一式 + 全セッションのログ + チェック質問の回答フルテキストは `/Users/hakaru/DEVELOP/swift-audit-agentic/` に保管。別モデル / 別ツールで再走行して反証してくれる方がいたら歓迎。
 
 - 母体記事: <https://zenn.dev/hakaru/articles/m2dx-local-llm-audit-zero-true-positives>
 - **M2DX-Core (OSS)**: <https://github.com/hakaru/M2DX-Core>

@@ -6,6 +6,8 @@ topics: ["macos", "swift", "appstore", "xpc", "powermetrics"]
 published: false
 ---
 
+![MacSlowCooker の Dock アイコン: idle → 高負荷 → 沸騰 → クールダウン](/images/macslowcooker/hero.gif)
+
 Mac の GPU 使用率と温度を、Dock の鍋アイコンで眺められたら楽しくない?
 
 ということで作った。**MacSlowCooker** という名前の常駐アプリ。GPU が忙しくなると鍋の下の炎がでかくなって、SoC 温度が上がると鍋が赤くなって、ファンが回ると湯気がモコモコ立つ。Activity Monitor の "GPU の履歴" みたいな数字の羅列じゃなくて、鍋として「煮込まれてる感」を出したい、ただそれだけのアプリ。

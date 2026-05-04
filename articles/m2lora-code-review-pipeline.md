@@ -275,3 +275,155 @@ Total: 0 | Exported: 0 | Flagged: 0
 | リポジトリ | https://github.com/hakaru/M2LoRA |
 
 「ローカルLLMに先輩AIのレビューを学ばせる」というループを作った。開発を続けながらモデルが育っていくはずで、（４）の手作りデータより持続可能なアプローチだと思っている。100件溜まったら結果を報告する。
+
+---
+
+## 追記：100件超えてLoRAを作った（2026-05-04）
+
+数週間で 174 件溜まった（M2DX のみ）。「100件で報告」と書いた手前、やってみた結果を書く。
+
+結論を先に。
+
+- ✅ Stage 1 LoRA **学習成功**: vast.ai H100 で 35 分 / loss 1.13 → 0.46 / **$1.70**
+- ✅ Gemini評価では明確改善: avg 3.85 → **5.32** / 高評価（≥7）率 **13.7% → 40.8%**
+- ❌ Claude評価では横ばい〜微減: 3.76 → 3.42
+- ❌ Codex評価器、長時間バックフィル中に **93%** NULL（死んだ）
+- ❌ ペア比較できてない（vanilla期と LoRA期で違う commit を評価してた）
+
+順番に。
+
+### Stage 1: spec を先に覚えさせる
+
+レビュー直接ではなく、まず spec corpus（FM 合成、MIDI 2.0、CoreMIDI、CoreAudio、Swift）を 3266 chunk 集めて continued pre-training（CPT）した。コードレビューSFTは Stage 2 に取っておく。
+
+vast.ai で H100 SXM 80GB（$1.83/hr / Czechia）を借りて流したら **35:10 で完走**。
+
+```
+12%|███   | 50/409 [04:24<30:53, 5.16s/it]
+{'loss': '1.136', 'learning_rate': '9.8e-05', 'epoch': '0.1225'}
+{'loss': '0.8053', ...}
+{'loss': '0.4572', 'learning_rate': '5.164e-07', 'epoch': '0.9798'}
+{'train_runtime': '2111', 'train_loss': '0.6644', 'epoch': '1'}
+```
+
+きれいな cosine カーブ。残高 $5.74 から $1.70 で済んだ。
+
+### LoRA を Ollama に組み込む
+
+学習済み adapter（556MB safetensors）を `convert_lora_to_gguf.py` で gguf に変換して、Ollama の Modelfile から読ませる。
+
+```
+FROM llama3.3:70b
+ADAPTER /path/to/m2lora-domain.gguf
+PARAMETER num_ctx 8192
+```
+
+```
+$ ollama create llama3.3:70b-m2lora-v1 -f Modelfile
+$ ollama run llama3.3:70b-m2lora-v1 "What is MIDI 2.0 Property Exchange?"
+> MIDI 2.0 Property Exchange (PX) is a protocol that allows
+> devices to dynamically discover, configure, and control
+> each other's capabilities and settings over a MIDI connection.
+```
+
+CPTだけでもMIDI 2.0 PEを正しく説明する。素のllama3.3:70bは「PXはたぶん...」程度の曖昧な答えしか返さなかったので、*ちょっとだけ感動*。
+
+### バックフィルで残り全コミット評価
+
+LoRA入れた状態で、未処理だった 62 commit を遡って評価し直した。狙いは Stage 2 用の高品質データを稼ぐこと。
+
+これが思ったより**事故った**。
+
+### 事故その1: 並列で詰まる
+
+「2並列なら速くね？」と思って `OLLAMA_NUM_PARALLEL=2` にしたら、各リクエストが3倍遅くなって15分タイムアウト連発。
+
+なぜかというと、`llama3.3:70b` を NUM_PARALLEL=2 にすると **約 160GB** 必要になって半分がCPUに退避する。VRAM 80GB の GPU で 70B 4-bit を動かしてる以上、KVキャッシュ x 2 を載せた瞬間にオーバーフロー。素直に `=1` に戻した。
+
+### 事故その2: LoRA入りモデルが固まる
+
+NUM_PARALLEL=1 にしても別の問題が出た。
+
+**LoRA adapter込みのモデルで、生成中の Python client を `kill -9` すると、Ollama 側のタスクが完全には解放されない**。次のリクエストがキューに詰まって永遠に応答待ち。
+
+最初の数件は2-3分で順調だったのに、たまたまmarkdown比率が高い特定の commit でハングしたから kill した。以降5時間で **6件** しか保存できなかった。
+
+```
+[m2lora] reviewing with llama3.3:70b-m2lora-v1...
+（35分経過、TCP は ESTABLISHED のまま）
+aiohttp.client_exceptions.SocketTimeoutError: Timeout on reading data from socket
+```
+
+*いや、そういうことじゃなくて…*
+
+aiohttp の `total=900s` タイムアウトはなぜか発火しない（後で `sock_read=120s` を追加した）。Ollama log を見ると `/api/generate` の完了エントリすら出ない。内部で止まってる。
+
+### 復活：完全再起動 + pre-warm
+
+`pkill -9 -f "ollama (serve|runner)"` で全部殺してから:
+
+```bash
+OLLAMA_MODELS=/Volumes/Media/ollama/models \
+  OLLAMA_NUM_PARALLEL=1 OLLAMA_KEEP_ALIVE=24h \
+  ollama serve > /tmp/ollama.log 2>&1 &
+
+# 必ず pre-warm
+curl http://localhost:11434/api/generate \
+  -d '{"model":"llama3.3:70b-m2lora-v1","prompt":"hi","stream":false}'
+```
+
+これで復活。以降4時間ノンストップで70commitを保存できた。**3.5分/件で安定**。
+
+教訓: *LoRA adapter込みmodelで client kill が起きたら、即 Ollama 完全再起動 + pre-warm*。30分待つくらいなら3分でリセットしたほうが傷が浅い。
+
+### 結果：Geminiは大絶賛、Claudeはお気に召さず
+
+LoRA入れる前後で、各評価CLI のスコア分布を比較した。同じ commit を両方で評価してないので**厳密比較じゃない**けど、傾向は出てる。
+
+| 指標 | vanilla `llama3.3:70b`（95件） | `m2lora-v1`（76件） | 差 |
+|---|---|---|---|
+| Gemini 平均 | 3.85 | **5.32** | **+1.47** |
+| Gemini ≥5 率 | 25.3% | **56.6%** | +31pt |
+| Gemini ≥7 率 | 13.7% | **40.8%** | +27pt |
+| Claude 平均 | 3.76 | 3.42 | -0.34 |
+| Codex（参考） | NULL率 27.8% | NULL率 **93.4%** | — |
+
+Gemini からは**明確に上がった**。Claude からは横ばい〜微減。Codex は途中で死んだのでサンプル不足。
+
+### 評価者間でなぜこんなに乖離する？
+
+仮説3つ。
+
+1. LoRA-v1 のレビューが**長くて自信ありげ** → Gemini が冗長性を評価しがち、Claude は内容の正しさを見るので長さに惑わされない
+2. LoRA-v1 が **MIDI/Swift 専門用語を頻出** → Gemini は「専門的」と評価、Claude は「内容次第」
+3. **ペアになってない**: vanilla は新しめの100commit、LoRA-v1 は残り（古い commit）。古い commit は依存少なくテスト未整備で指摘点が多いから、自然と高評価になる傾向
+
+たぶん全部影響してる。
+
+### 何ができてないか
+
+- **ペア比較できてない**: 同じ commit を両モデルで評価し直さないと、世代差か commit selection か切り分けられない
+- **Codex 評価器の死活監視がなかった**: 長時間バックフィル中に 93% NULLになっても気づかなかった
+- **Stage 2 用のサンプル数**: avg≥6.0 でフィルタすると LoRA期の export は **7件** しかない。SFT には全然足りない
+
+正直、Stage 2 用のデータ稼ぎという目的なら**まだ実用じゃない**。Geminiの数字だけ見ると改善してるけど、それが「いい review」なのか「Gemini好みのreview」なのかは保留。
+
+### 次の一手
+
+- Codex CLIに死活監視を入れる（30分ごとに `codex --version` 等で生存確認、死んでたら再起動）
+- ペアテスト用ハーネスを作る: 同じ commit集合を両世代で評価し直して直接比較
+- M2DX以外（MIDI2Kit / M2DX-Core）でも収集再開して、commit集合を増やす
+- Stage 2: alpaca SFT は7件じゃ足りないので、CPT継続 or データ生成に方針転換するか考え中
+
+### 更新したまとめ
+
+| 項目 | 内容 |
+|---|---|
+| 収集件数 | M2DX 173件 |
+| Stage 1 LoRA | `llama3.3:70b-m2lora-v1`（CPT / spec corpus 3266 chunks） |
+| 学習コスト | vast.ai H100 80GB / 35分 / **$1.70** |
+| Gemini基準改善 | ≥7 高評価率 **13.7% → 40.8%** |
+| Claude基準改善 | なし（むしろ微減） |
+| Stage 2 状況 | サンプル7件で再考中 |
+
+「ローカルLLM自身を採点官3人に育てさせる」ループは**最低限動いた**。ただし*「ペアテストせずに改善を語るな」*という当たり前の罠に一度落ちたので、次回は同じ commit を両世代で評価する仕組みから作る。

@@ -20,7 +20,7 @@ Mac の GPU 使用率と温度を、Dock の鍋アイコンで眺められたら
 
 - root の `LaunchDaemon`（= macOS のシステム起動時に常駐させる root プロセス）が使えない（App Store は `SMAppService.loginItem`、つまり**ユーザー権限のログイン項目**しか許さない）
 - Sandbox（= App Store アプリ必須のプロセス隔離環境）の中から `/usr/bin/powermetrics` を spawn できない
-- `IOHIDEventSystem` と `AppleSMC` を直叩きしている（**私的 API**）
+- `IOHIDEventSystem` と `AppleSMC` を直叩きしている（**Apple のプライベート API**）
 
 iStat Menus も Stats も TG Pro も、ハードウェアを覗くタイプの常駐アプリは全部 Notarized DMG（= Apple のサーバで公証を受けた DMG、Gatekeeper 警告なしで開ける）配布。**「Mac のハードウェアを覗くアプリ」と「App Store」は構造的に両立しない**。
 
@@ -88,9 +88,9 @@ XPC（= Apple の RPC、プロセス間通信）でメインアプリと root �
 
 App Store アプリは Sandbox **必須**。`Process` で `/usr/bin/powermetrics` を spawn しようとしても、`powermetrics` 自体が root を要求するし、root じゃなくても **任意のプロセスを spawn する権限**自体が Sandbox にない。`com.apple.security.temporary-exception.process.spawn` みたいな entitlement は App Store では通らない。
 
-### 3. 私的 API を使っている
+### 3. プライベート API を使っている
 
-`IOHIDEventSystemClientCreate` / `IOHIDServiceClientCopyEvent` あたりは全部 **私的 API**（= Apple が公開していない内部 API。使うと App Store で reject される）。
+`IOHIDEventSystemClientCreate` / `IOHIDServiceClientCopyEvent` あたりは全部 **Apple のプライベート API**（= 公開ヘッダに無い内部 API。使うと App Store で reject される）。
 
 ```swift
 @_silgen_name("IOHIDEventSystemClientCreate")

@@ -1,40 +1,20 @@
 ---
-title: "GPU 使用率を Dock の鍋アイコンで可視化したかった ─ App Store に出せない件"
+title: "GPU で料理しよう。 MacSlowCooker"
 emoji: "🍲"
 type: "tech"
 topics: ["macos", "swift", "appstore", "xpc", "powermetrics"]
-published: false
+published: true
 ---
 
 ![MacSlowCooker の Dock アイコン: idle → 高負荷 → 沸騰 → クールダウン](/images/macslowcooker/hero.gif)
 
-Mac の GPU 使用率と温度を、Dock の鍋アイコンで眺められたら楽しくない?
+GPUフル回転させていると暖房に使える。これだけ熱くなれば煮込み料理も作れるんじゃない? 思ったことがありますよね。
 
 ということで作った。**MacSlowCooker** という名前の常駐アプリ。GPU が忙しくなると鍋の下の炎がでかくなって、SoC 温度が上がると鍋が赤くなって、ファンが回ると湯気がモコモコ立つ。
+Macの上に載せた鍋の温度管理にも使えます。
 
-…で、最後に App Store 配布できるか確認したら **無理**だった。理由が macOS の権限モデルの解像度を上げる教材としてちょうどよかったので、企画から「出せない」までを残しておく。
-
-## 結論
-
-❌ App Store 配布は無理。理由は3つ:
-
-- root の `LaunchDaemon`（= macOS のシステム起動時に常駐させる root プロセス）が使えない（App Store は `SMAppService.loginItem`、つまり**ユーザー権限のログイン項目**しか許さない）
-- Sandbox（= App Store アプリ必須のプロセス隔離環境）の中から `/usr/bin/powermetrics` を spawn できない
-- `IOHIDEventSystem` と `AppleSMC` を直叩きしている（**Apple のプライベート API**）
-
-iStat Menus も Stats も TG Pro も、ハードウェアを覗くタイプの常駐アプリは全部 Notarized DMG（= Apple のサーバで公証を受けた DMG、Gatekeeper 警告なしで開ける）配布。**「Mac のハードウェアを覗くアプリ」と「App Store」は構造的に両立しない**。
-
-## 企画
-
-きっかけはわりと物理的な話。M3 Ultra でローカル LLM 推論を一晩回していると、机に置いた本体が **本気で熱を持つ**。手をかざすと暖房代わりになるし、上に保温したい料理を載せたら本当にサーブまでいけそうな温度になる。
-
-> *これ、上にカレー鍋載せたら煮込めるんじゃ?*
-
-…と思ったわけではないけど、本気で **GPU の熱で何か作れそう** 感は何度かあった。アルミ筐体の Mac は本物の調理器具感がある。
-
-そこから「GPU 使用率を **鍋として** Dock に置きたい」に直結した。LLM 推論やってると GPU が今ヒマか忙しいかチラ見できないストレスが溜まる。Activity Monitor の GPU タブをわざわざ開きに行くと「動いてるのを動いてるか確認しに行く」体験になって萎える。Dock の鍋アイコンで完結するなら、ウィンドウを切り替えずに済む。
-
-ただ「数字が出てるだけ」だとつまらない。**鍋メタファー**で物理量を全部マッピングする。
+というわけでGPU 使用率を **鍋として** Dock に置きたい。
+LLM 推論やってると GPU が今ヒマか忙しいかチラ見できないストレスが溜まる。Activity Monitor の GPU タブ開きっぱなしにしてたけどただ邪魔なだけ。Dock の鍋アイコンが理想。
 
 | 物理量 | 鍋での表現 |
 |---|---|
@@ -43,13 +23,11 @@ iStat Menus も Stats も TG Pro も、ハードウェアを覗くタイプの�
 | ファン RPM | 蓋から立ち昇る湯気の本数・太さ |
 | `thermal_pressure`（= macOS が報告する温度カテゴリ、Nominal/Fair/Serious/Critical） | 沸騰演出（蓋ガタガタ + 赤い湯気） |
 
-GPU が忙しい = 火が強い = 鍋が煮える。温度が上がる = 鍋が赤くなる。**全部物理的に同じ向きに動く**ので、メタファーとして破綻しない。
-
-名前は **MacSlowCooker**。スロークッカーは「弱火でずっと煮込む鍋」だけど、その逆向き — *強火でフル稼働してたら鍋が泣くよ* — というニュアンス。
+夢）Macアルミ天板の温度取得ができれば、調理器具としても完璧なのだが。。
 
 ## 実装
 
-ざっくり構成:
+構成:
 
 ```
 MacSlowCooker.app（非特権、ユーザーセッション）
@@ -74,7 +52,9 @@ XPC（= Apple の RPC、プロセス間通信）でメインアプリと root �
 
 ここまでは API を引っ張れば普通に作れる。**問題は配布の段になってから**。
 
-## App Store に出せない件（本題）
+## App Store に出せない！！！
+❌ App Store 配布は無理。
+
 
 ### 1. root の LaunchDaemon が使えない
 
@@ -97,23 +77,20 @@ App Store アプリは Sandbox **必須**。`Process` で `/usr/bin/powermetrics
 private func IOHIDEventSystemClientCreate(_ allocator: CFAllocator?) -> Unmanaged<AnyObject>?
 ```
 
-`@_silgen_name`（= Swift で C/Obj-C シンボルに直接リンクする属性、本来は標準ライブラリ実装用）で直接シンボルを拾ってる時点で App Store のスタティック解析に引っかかる。Stats・iStat Menus・Chromium の `m1_sensors_mac.mm` 全員が同じ事をやっていて、**他にやり方がない**。
+`@_silgen_name`（= Swift で C/Obj-C シンボルに直接リンクする属性、本来は標準ライブラリ実装用）で直接シンボルを拾ってる時点で App Store のスタティック解析に引っかかる。Stats・iStat Menus・Chromium の `m1_sensors_mac.mm` 全員が同じ事をやっていて、**他にやり方がない**
 
-### 残された配布ルート
+。
+ https://github.com/hakaru/MacSlowCooker
 
-App Store がダメなら **Notarized DMG**。Apple Developer ID で署名 → `xcrun notarytool submit` で公証 → `stapler staple` でチケット添付 → DMG。Gatekeeper の警告なしでインストールできる。
+##  MRTG 　　（インターネット老人会向け機能）
 
-…と書きつつ、MacSlowCooker は個人用に作ったので、配布するつもりはない。OSS にして「自分で署名して clone してビルド」が現実解。Apache 2.0 で公開: https://github.com/hakaru/MacSlowCooker
+履歴系統。
 
-## その後 ─ MRTG (1995年) リスペクト
+調理器具としても何時間なん度℃で煮込まれていたかの可視化は大変に重要。
 
-App Store がダメなら好きに作ろう、と思って生やしたのが履歴系統。
+**MRTG**（Multi Router Traffic Grapher、1995年〜）でいこう。
+今でいう **Grafana + Prometheus** の祖先。
 
-最初は ring buffer（= 古い要素を上書きしていく固定長バッファ）に60サンプルしか持っておらず過去30秒分しか見えなかった。LLM トレーニング一晩回した後の温度推移を振り返れない。冒頭の「鍋でカレー煮込めるんじゃ?」感の延長で、*どれくらいの時間どれくらいの温度で煮込まれてたか* を知りたい。
-
-で、思い出したのが **MRTG**（Multi Router Traffic Grapher、1995年〜）。SNMP polling して Daily/Weekly/Monthly/Yearly の4枚のグラフを淡黄色背景に濃緑塗りで吐く、あの牧歌的なやつ。今でいう **Grafana + Prometheus** の祖先。
-
-これを Mac の GPU 監視に持ち込んだら *いい感じに懐かしくないか* と思って、3系統の出力を生やした。
 
 ### 1. アプリ内 History ウィンドウ (Cmd+Shift+H)
 
@@ -137,23 +114,18 @@ macslowcooker_thermal_pressure 0
 
 ### 3. PNG + index.html （本物のMRTG workflow）
 
-ここまでくると「もう本家 MRTG そのままやれば？」という気持ちになる。`SwiftUI` の `ImageRenderer`（= SwiftUI の view を CGImage に焼く API、macOS 13+）で MRTG パネルを rasterize して 8枚のPNG + auto-refresh 入りの `index.html` を5分ごとに吐き出す。
+もう本家 MRTG でやれよ。`SwiftUI` の `ImageRenderer`（= SwiftUI の view を CGImage に焼く API、macOS 13+）で MRTG パネルを rasterize して 8枚のPNG + auto-refresh 入りの `index.html` を5分ごとに吐き出す。
 
 ```bash
 python3 -m http.server -d ~/Library/Application\ Support/MacSlowCooker/web/
 # http://localhost:8000/ で 8枚並んで auto-refresh
 ```
 
-これは **本物の MRTG そのままの workflow**。1995年の人が見たら「ああ、これな」って言うはず。
+老人会の会員が見たら「ああ、これな」
 
-## まとめ
 
-GPU 使用率を鍋アイコンで可視化したい、という思いつきから始まったので、最初は楽しい開発だった。
+https://github.com/hakaru/MacSlowCooker
 
-そこから macOS 26 で `powermetrics` の plist スキーマが変わってる / SMC sampler が削除されてる / `@main` AppDelegate が動かない …と、気付くたびに地雷の解像度が上がっていく。最後に App Store 配布の検証で「全部詰んでた」と分かった。**Mac のハードウェアを覗くタイプのアプリは構造的に App Store 不可**、というのは知識として知ってたけど、自分で踏み抜いて初めて重みが分かる。iStat Menus が App Store に出ない理由が、自分で同じ穴に落ちて初めて納得できた。
-
-App Store ダメ → 配布する気もないし好きに作ろう、で生やした履歴系統が思いのほか実用的になった。手元で見るならアプリ内 (Cmd+Shift+H)、Grafana に流すなら Prometheus、社内 wiki に貼るなら PNG。MRTG リスペクトは *よい*。1995年のツールへのオマージュなので。
-
-最初の動機 — *Mac に手を当てたら煮込み料理できそうなくらい熱い* — を、ちゃんと「いつどれくらい煮込まれてたか」をグラフで振り返れるようになった。鍋アイコンに対してフィードバックが完結している、ぐらいの達成感はある。
-
-リポジトリ: https://github.com/hakaru/MacSlowCooker
+Testflightテスターお願いします。
+https://testflight.apple.com/join/Vk9S4kmn
+https://testflight.apple.com/join/BAtGszPw

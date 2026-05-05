@@ -91,7 +91,6 @@ private func IOHIDEventSystemClientCreate(_ allocator: CFAllocator?) -> Unmanage
 **MRTG**（Multi Router Traffic Grapher、1995年〜）でいこう。
 今でいう **Grafana + Prometheus** の祖先。
 
-![MacSlowCooker の MRTG 風履歴画面: Compute (GPU% + Power) と Thermal (温度 + Fan) の Daily / Weekly / Monthly / Yearly 8パネル](/images/macslowcooker/mrtg.png)
 
 
 ### 1. アプリ内 History ウィンドウ (Cmd+Shift+H)
@@ -124,6 +123,7 @@ python3 -m http.server -d ~/Library/Application\ Support/MacSlowCooker/web/
 ```
 
 老人会の会員が見たら「ああ、これな」
+![MacSlowCooker の MRTG 風履歴画面: Compute (GPU% + Power) と Thermal (温度 + Fan) の Daily / Weekly / Monthly / Yearly 8パネル](/images/macslowcooker/mrtg.png)
 
 
 https://github.com/hakaru/MacSlowCooker

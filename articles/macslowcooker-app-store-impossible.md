@@ -163,7 +163,7 @@ https://testflight.apple.com/join/BAtGszPw
 
 ![MacSlowCooker Cooking Plate Cluster Edition — Mac mini 4台を縦に積んで上に Cooking Plate を載せた構成のコンセプト製品ページ](/images/macslowcooker/cluster-edition.jpeg)
 
-Mac Studio 単体で物足りないあなたへ、**Cluster Edition**。Mac mini を **4台縦積み** して上に1枚の Cooking Plate を載せる構成。LLM 学習ラックの自然な形態として注目される (注目されてない)。
+Mac Studio 単体で物足りないあなたへ、**Cluster Edition**。Mac mini を **4台縦積み** して上に1枚の Cooking Plate を載せる構成。LLM 学習ラックの自然な形態として注目される (＾＾
 
 スペック:
 
@@ -176,12 +176,7 @@ Mac Studio 単体で物足りないあなたへ、**Cluster Edition**。Mac mini
 | 推奨料理 | タンドール風ナン / 大鍋ソーヴィード / パン生地発酵 |
 | 価格 | ¥29,800 から |
 
-ジョークの実装としては:
 
 - **発熱4倍** ─ 4台の Mac mini が同時に並列推論を回す = 4 × 60-90W = ~300W 級
-- **空気の流れが死ぬ** ─ 縦積みすると下のミニが上のミニに排熱を浴びせるので、実際の温度は単体時より高くなる (= ジョークとしては嬉しい)
 - **MacSlowCooker は per-Mac 監視 + クラスター集計対応** ─ 各台の Dock アイコンがそれぞれ別の鍋になり、合算データはダッシュボードへ
 
-…と書きつつ、**やらないでください**。空気が回らないので Mac mini が熱で死にます。アルミ筐体の温度を上げる代わりに SoC が thermal throttle を発動して LLM 推論性能が落ちます。物理的にも経済的にも普通に loss。
-
-ローカル LLM 学習ラックを組むなら、**横に並べて間隔を空けて** くださいね。それはそれで MacSlowCooker (per-Mac 版) で全台監視できます (本当)。

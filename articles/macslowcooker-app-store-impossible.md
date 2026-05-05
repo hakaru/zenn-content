@@ -126,8 +126,10 @@ python3 -m http.server -d ~/Library/Application\ Support/MacSlowCooker/web/
 
 https://github.com/hakaru/MacSlowCooker
 
-Testflightテスターお願いします。
+Testflightテスターもお願いします。
+
 https://testflight.apple.com/join/Vk9S4kmn
+
 https://testflight.apple.com/join/BAtGszPw
 
 ---

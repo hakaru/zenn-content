@@ -8,12 +8,10 @@ published: true
 
 ![MacSlowCooker の Dock アイコン: idle → 高負荷 → 沸騰 → クールダウン](/images/macslowcooker/hero.gif)
 
-GPUフル回転させていると暖房に使える。これだけ熱くなれば煮込み料理も作れるんじゃない? 思ったことがありますよね。
+GPUフル回転させていると暖房に使える。これだけ熱くなれば煮込み料理も作れるんじゃない? 思ったことあるよね。
 
-ということで作った。**MacSlowCooker** という名前の常駐アプリ。GPU が忙しくなると鍋の下の炎がでかくなって、SoC 温度が上がると鍋が赤くなって、ファンが回ると湯気がモコモコ立つ。
+ということで　**MacSlowCooker** GPU が忙しくなると鍋の下の炎がでかくなって、SoC 温度が上がると鍋が赤くなって、ファンが回ると湯気がモコモコ立つ。
 Macの上に載せた鍋の温度管理にも使えます。
-
-というわけでGPU 使用率を **鍋として** Dock に置きたい。
 LLM 推論やってると GPU が今ヒマか忙しいかチラ見できないストレスが溜まる。Activity Monitor の GPU タブ開きっぱなしにしてたけどただ邪魔なだけ。Dock の鍋アイコンが理想。
 
 | 物理量 | 鍋での表現 |
@@ -86,7 +84,7 @@ private func IOHIDEventSystemClientCreate(_ allocator: CFAllocator?) -> Unmanage
 
 履歴系統。
 
-調理器具としても何時間なん度℃で煮込まれていたかの可視化は大変に重要。
+調理器具として何時間なん度℃で煮込まれていたかの可視化は大変に重要。
 
 **MRTG**（Multi Router Traffic Grapher、1995年〜）でいこう。
 今でいう **Grafana + Prometheus** の祖先。

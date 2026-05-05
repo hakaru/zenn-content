@@ -131,3 +131,11 @@ https://github.com/hakaru/MacSlowCooker
 Testflightテスターお願いします。
 https://testflight.apple.com/join/Vk9S4kmn
 https://testflight.apple.com/join/BAtGszPw
+
+---
+
+## 追加情報: MacSlowCooker Cooking Plate (コンセプト)
+
+![MacSlowCooker Cooking Plate concept — Mac Studio の天板に乗せる調理用アルミプレートのモック](/images/macslowcooker/cooking-plate-concept.jpeg)
+
+ジョーク。本物の調理器具ではありません。Mac Studio M3 Ultra で GPU 100% 連続稼働しても天板は ~65℃ までしか上がらないので、低温調理ローストビーフが限界です（やらないでください）。

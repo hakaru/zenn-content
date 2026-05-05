@@ -427,3 +427,164 @@ Gemini からは**明確に上がった**。Claude からは横ばい〜微減�
 | Stage 2 状況 | サンプル7件で再考中 |
 
 「ローカルLLM自身を採点官3人に育てさせる」ループは**最低限動いた**。ただし*「ペアテストせずに改善を語るな」*という当たり前の罠に一度落ちたので、次回は同じ commit を両世代で評価する仕組みから作る。
+
+---
+
+## 追記その2：Mac M3 Ultra で同じことやってみたら全然ダメだった（2026-05-05）
+
+vast.ai で $1.70 で済んだのは確かに安いけど、手元に **M3 Ultra 96GB unified RAM** がある。70B 4-bit + LoRA は理論上ぜんぶ載る。MLX なら Apple 純正で速いはず。**同じデータ・同じ設定で回したら何分で終わる？**
+
+これがまた、地獄だった。
+
+結論を先に。
+
+- ❌ 3回挑戦して **3回とも Metal GPU error で死亡**（iter 400 / 70 / 10）
+- ❌ MLX-LM の `lr_schedule` で warmup+cosine が**設定通りに動かなかった**（mlx-lm のソース読んで原因判明）
+- ❌ ベストなadapter (iter 200, val 0.822) は v1 final 0.46 に届かず
+- ✅ **動くは動く** — 96GB unified RAM、70B+LoRA で peak 46GB、ハードは余裕
+- ✅ コスト $0（電気代のみ）、**ただし 6 倍遅い**（v1 35min vs Mac 3.5h+）
+
+順番に。
+
+### 準備：mlx-lm + 40GB ダウンロード
+
+```bash
+uv add mlx-lm hf_transfer
+HF_HUB_ENABLE_HF_TRANSFER=1 huggingface-cli download \
+  mlx-community/Llama-3.3-70B-Instruct-4bit \
+  --local-dir ~/models/Llama-3.3-70B-Instruct-4bit-MLX
+```
+
+40GB を ~6MB/s でダウンロード。**2.5時間**待った。`hf_transfer` を入れてもなぜか速度は変わらず…HF 側の速度規制？
+
+### 罠1：warmup なしで発散
+
+最初は v1 と同じ `lr=2e-4` をそのまま入れた。気づいたらこうなってた。
+
+```
+Iter 10: 1.966
+Iter 30: 5.974
+Iter 50: 19.652  ← peak
+Iter 90: 10.078
+```
+
+vast.ai v1 は `warmup_steps=100` を入れてたから、これが効いてる気がする。MLX 版は `warmup` を YAML に入れずスタートしてしまった結果、LoRA重みが初期値 0 から一気にぶっとんで発散。
+
+### 罠2：YAML で warmup+cosine を書いたが、LR が線形に上がり続ける
+
+mlx-lm のドキュメント通りに書いた。
+
+```yaml
+lr_schedule:
+  name: cosine_decay
+  warmup: 100
+  warmup_init: 1.0e-7
+  arguments: [2.0e-4, 308]
+```
+
+期待: warmup100 で 0→2e-4、その後 cosine で 2e-4→0 に decay。
+
+実際:
+
+```
+Iter 10:  LR 2.099e-06   ← warmup 12% のはずが
+Iter 100: LR 4.808e-05   ← warmup 完了で 2e-4 のはずが
+Iter 200: LR 9.805e-05
+Iter 300: LR 1.480e-04   ← LR が線形に上がり続けてる
+Iter 408: LR 2.000e-04   ← 終端でようやくピーク
+```
+
+**cosine_decay が一切効いてない**。
+
+```
+Iter 200: val 0.822  ← BEST
+Iter 250: train 2.067 ← また発散開始
+Iter 300: val 10.157  ← 完全に壊れた
+```
+
+iter 200 までは収束してたが、LR が想定外に上がり続けて再発散。
+
+### 原因：`iters` は **micro-step** だった
+
+mlx-lm のソースを読んだ:
+
+```python
+# mlx_lm/tuner/trainer.py
+for it, batch in zip(range(1, args.iters + 1), iterate_batches(...)):
+    if it % grad_accum_steps == 0:
+        optimizer.update(...)  # ← LR スケジュールはここで進む
+```
+
+つまり:
+
+- `iters: 408` + `grad_accumulation_steps: 4` → 実際の **optimizer step は 102 のみ**
+- `warmup: 100` は **opt step** で数える → 完了は iter 100×4 = **iter 400**
+- iter 100 で観測 LR 4.8e-5 = 2e-4 × 25/100（opt step 25 = warmup 25% 地点）と完全一致
+
+なるほど。HF Trainer は `warmup_steps=100` が opt step で、`num_train_epochs=1` で計算した opt step 数のなかでの warmup。MLX は `iters` 自体が micro-step で、warmup や cosine は opt step。**同じ数字を入れたら 4倍ズレる**。
+
+修正: `iters: 1636 = 409 × 4`。
+
+### 罠3：直後 Metal GPU error で死亡
+
+`iters: 1636` で再起動。warmup ramp が想定通り動き始めた。よし。
+
+```
+Iter 70: Train loss 0.903, Learning Rate 3.208e-05
+libc++abi: terminating due to uncaught exception of type std::runtime_error: 
+[METAL] Command buffer execution failed: Discarded 
+(victim of GPU error/recovery) 
+(00000005:kIOGPUCommandBufferCallbackErrorInnocentVictim)
+```
+
+**`kIOGPUCommandBufferCallbackErrorInnocentVictim`**。直訳すると「無実の犠牲者」。GPU 上で他の何かが死んだ巻き添えで自分も殺された、みたいな意味。
+
+`save_every: 25` に縮めて再々挑戦したら **iter 10 で同じエラー**。劣化してる。
+
+### 結局3連敗
+
+| 試行 | iters設定 | 死因 | 到達 | best loss |
+|---|---|---|---|---|
+| 1 | 408（warmup無し） | Metal GPU error @ iter 408 | 完走時死亡 | 9.5（発散） |
+| 2 | 408（warmup有、解釈ミス） | 自然終了 | 408 | val 0.822 @ iter 200 |
+| 3 | 1636（修正版） | Metal GPU error @ iter 70 | 70 | (途中) |
+| 4 | 1636（save_every=25） | Metal GPU error @ iter 10 | 10 | (途中) |
+
+**ハードに問題はなかった**。peak メモリ 46GB（96GB unified の半分）、サーマル警告なし、`pmset -g therm` も `No thermal warning level has been recorded`。
+
+それでも Metal の command buffer がランダムに殺される。MLX フォーラムや GitHub issues を漁ると、**長時間連続 GPU 計算 + 大きいモデル**で散発的に出るらしい。再起動で改善することもあるが根治はしてない。
+
+### vast.ai と並べると
+
+| 軸 | vast.ai H100 v1 | Mac M3 Ultra MLX |
+|---|---|---|
+| 動いた？ | ✅ 408/408 完走 | ❌ 3/4 で Metal error |
+| Final loss | **0.46** | 0.822（iter 200 ベスト）/ 残りは発散か途中死 |
+| Wall time | 35:10 | 3.5h（iter 200まで届いた回） |
+| 直接コスト | $1.70 | $0（電気代） |
+| セットアップ | torch/cu124/unsloth で依存解決の罠 | mlx-lm 入れるだけだが YAML config の罠 |
+| 開発体験 | Unsloth が至れり尽くせり | 各設定の意味を毎回ソース確認 |
+| 安定性 | ◎（H100 が悪さしない） | △（Metal が散発死） |
+
+### 教訓
+
+1. **`iters` の単位はフレームワーク依存**: HF Trainer は opt step、MLX-LM は micro-step。grad accumulation 入れると 4倍ズレる
+2. **lr_schedule は実機で LR ログをまず見る**: 観測した LR 値が想定値と桁違いなら設定間違い
+3. **Metal GPU error は config では治らない**: ハードがイケても OS/driver レベルで shed される。長時間 sustained 70B 計算は M3 Ultra でもまだギリギリ
+4. **MLX エコシステムは Unsloth に追いつけてない**: ドキュメント、エラーメッセージ、ベストプラクティス。**1〜2年は cloud 一択**
+
+ベスト adapter（iter 200, val 0.822）は手元に残ったので、Stage 2 比較用に Ollama に組み込んで採点官3人に評価させれば、品質差が定量化できる。それは次回。
+
+---
+
+## 更新したまとめ（2026-05-05）
+
+| 項目 | 内容 |
+|---|---|
+| 収集件数 | M2DX 173件 |
+| Stage 1 LoRA v1 | vast.ai H100 / 35min / **$1.70** / loss 0.46 |
+| Stage 1 LoRA v2 (Mac MLX) | M3 Ultra / 3.5h / $0 / loss 0.822（途中） / 後続2回はMetal死 |
+| Gemini評価改善 (v1) | ≥7 高評価率 13.7% → 40.8% |
+| 教訓 | クラウド圧勝。ハードはMacでも回るが、ツールチェーンが追いついてない |
+
+リポジトリ: https://github.com/hakaru/M2LoRA

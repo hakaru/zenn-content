@@ -138,7 +138,6 @@ https://testflight.apple.com/join/BAtGszPw
 
 ![MacSlowCooker Cooking Plate concept — Mac Studio の天板に乗せる調理用アルミプレートのモック](/images/macslowcooker/cooking-plate-concept.jpeg)
 
-「本気で煮込める」候補を熱量 × 天板の平らさで並べると:
 
 | Mac | 天板 | 発熱 | 鍋向き |
 |---|---|---|---|
@@ -151,7 +150,7 @@ https://testflight.apple.com/join/BAtGszPw
 実用度ランキング:
 
 1. **Mac Studio** ─ 平らで広い + Ultra なら本当に熱い。M3 Ultra は理論上ローストビーフ低温調理可能 (60〜70℃ 帯に GPU 全開状態)
-2. **Mac mini** ─ サイズ的にコーヒー保温が現実的
+2. **Mac mini** ─ サイズ的にコーヒー保温が現実的 
 3. それ以外は厳しい
 
 …と書きつつ、Apple は天板温度を **室温+15℃前後** で抑えるよう冷却設計してるので、実際は煮込み料理には全然足りない (60℃以上必要)。**保温には十分**。

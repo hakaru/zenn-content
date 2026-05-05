@@ -16,12 +16,12 @@ published: false
 
 ## 前回までのあらすじ
 
-このシリーズでは M3 Ultra (96GB) + Ollama を使って、自分の Swift/MIDI プロジェクトにローカル LLM を投入し続けている。
+このシリーズでは M3 Ultra (96GB) + Ollama（= 手元のMacでLLMを動かすランタイム）を使って、自分の Swift/MIDI プロジェクトにローカル LLM を投入し続けている。
 
-- **（１）監査**: llama3.3:70b 他10モデルで DX7 エンジンを監査 → 指摘52件・真陽性0件
-- **（２）RAG**: Swift 仕様書を検索させる → TP = 0 のまま
+- **（１）監査**: llama3.3:70b 他10モデルで DX7 エンジンを監査 → 指摘52件・真陽性0件（TP=true positive、本当のバグの数）
+- **（２）RAG**: Swift 仕様書を検索させる（= LLM に外部資料を読ませて答えさせる手法） → TP = 0 のまま
 - **（３）aider**: ツール統合でコーディングアシスト → 実用的だが監査は依然ダメ
-- **（４）LoRA**: 73件の手作りデータで Qwen2.5-Coder-14B をファインチューン → **誤検知93%削減**
+- **（４）LoRA**: 73件の手作りデータで Qwen2.5-Coder-14B をファインチューン（= 既存LLMに追加学習で味付けすること、LoRA はその効率版）→ **誤検知93%削減**
 
 （４）で「量より密度」という教訓を得た。手作りデータは効いた。じゃあ**自動で高品質なデータを貯め続けたら？**
 
@@ -48,11 +48,11 @@ published: false
   1. ローカルLLM（llama3.3:70b）がコードをレビュー
   2. Claude Code / Gemini / Codex CLI が「そのレビューはどうか」を採点
   3. 3者の採点を合成して「理想のレビュー」を生成
-  4. diff → 理想レビュー の ペアを蓄積
+  4. diff（= コードの変更箇所） → 理想レビュー の ペアを蓄積
   5. 十分溜まったら LoRA でファインチューン
 ```
 
-ポイントは**クラウドAPIを使わない**こと。Claude Code / Gemini / Codex はすでに開発ツールとして手元で動いている。これらをサブプロセスとして呼べばいい。
+ポイントは**クラウドAPIを使わない**こと。Claude Code / Gemini / Codex はすでに開発ツールとして手元で動いている（AnthropicとOpenAIとGoogleのコーディングCLI）。これらをサブプロセスとして呼べばいい。
 
 ```python
 # API呼び出しではなく、CLIをサブプロセスで起動
@@ -77,7 +77,7 @@ MIDI2Kit / M2DX / M2DX-Core
         │
    git commit
         │
-  post-commit フック（バックグラウンド実行）
+  post-commit フック（= コミット直後に走るgitスクリプト、バックグラウンド実行）
         │
 ┌───────▼────────────────────────────────────┐
 │  llama3.3:70b (Ollama)                     │
@@ -103,9 +103,11 @@ MIDI2Kit / M2DX / M2DX-Core
         │
    SQLite (WAL モード)
         │
-   m2lora export → Alpaca JSONL
+   m2lora export → Alpaca JSONL（= 1行1JSONの学習用フォーマット）
         │
-   VAST.ai + Unsloth → LoRA アダプタ
+   VAST.ai（= GPU を時間貸ししてくれるサービス）
+   + Unsloth（= LoRA 学習を高速化するライブラリ）
+   → LoRA アダプタ（= 元モデルに足す小さな追加重み）
         │
    Ollama にインポート → 次のサイクルへ
 ```
@@ -143,7 +145,7 @@ def parse_eval_output(text: str) -> EvalResult:
 | `code_diff` | 入力（Alpaca の input） |
 | `synthesized_review` | 理想レビュー（Alpaca の output） |
 | `claude_score` / `codex_score` / `gemini_score` | 各採点官のスコア |
-| `score_stddev` | 3者のスコアばらつき |
+| `score_stddev` | 3者のスコアばらつき（標準偏差） |
 | `flagged` | stddev > 2.0（採点官が意見不一致） |
 | `exported` | Alpaca 変換済みフラグ |
 
@@ -294,9 +296,11 @@ Total: 0 | Exported: 0 | Flagged: 0
 
 ### Stage 1: spec を先に覚えさせる
 
-レビュー直接ではなく、まず spec corpus（FM 合成、MIDI 2.0、CoreMIDI、CoreAudio、Swift）を 3266 chunk 集めて continued pre-training（CPT）した。コードレビューSFTは Stage 2 に取っておく。
+LoRA は **2段構え**にしてる。Stage 1 は **CPT**（continued pre-training、= 元モデルの「素の文章を読む」訓練を引き継いで継続させる方法）で**ドメイン知識**を入れ、Stage 2 は **SFT**（supervised fine-tuning、= 入力→正解出力のペアで「振る舞い」を教える方法）でレビュー作法を上乗せする想定。
 
-vast.ai で H100 SXM 80GB（$1.83/hr / Czechia）を借りて流したら **35:10 で完走**。
+レビュー直接ではなく、まず spec corpus（= 仕様書テキスト集、FM 合成・MIDI 2.0・CoreMIDI・CoreAudio・Swift）を 3266 chunk（= 文書を学習に流せるサイズに切ったかたまり）集めて Stage 1 をやった。
+
+vast.ai で H100 SXM 80GB（NVIDIA の最新世代GPU、VRAM 80GB付き、$1.83/hr / チェコ）を借りて流したら **35:10 で完走**。
 
 ```
 12%|███   | 50/409 [04:24<30:53, 5.16s/it]
@@ -306,11 +310,11 @@ vast.ai で H100 SXM 80GB（$1.83/hr / Czechia）を借りて流したら **35:1
 {'train_runtime': '2111', 'train_loss': '0.6644', 'epoch': '1'}
 ```
 
-きれいな cosine カーブ。残高 $5.74 から $1.70 で済んだ。
+`loss`（= 学習中の予測誤差、低いほど学べてる）が 1.136 → 0.4572 へ。learning_rate（= 重みを更新する勢い）も cosine（= 半周期の余弦カーブで滑らかに減らすスケジュール）でちゃんと下がってる。残高 $5.74 から $1.70 で済んだ。
 
 ### LoRA を Ollama に組み込む
 
-学習済み adapter（556MB safetensors）を `convert_lora_to_gguf.py` で gguf に変換して、Ollama の Modelfile から読ませる。
+学習済み adapter（= 追加重みファイル、556MB の `safetensors` 形式）を `convert_lora_to_gguf.py` で **gguf**（= llama.cpp / Ollama が読める形式）に変換して、Ollama の Modelfile（= モデルの組み合わせを書くレシピ）から読ませる。
 
 ```
 FROM llama3.3:70b
@@ -330,7 +334,7 @@ CPTだけでもMIDI 2.0 PEを正しく説明する。素のllama3.3:70bは「PX�
 
 ### バックフィルで残り全コミット評価
 
-LoRA入れた状態で、未処理だった 62 commit を遡って評価し直した。狙いは Stage 2 用の高品質データを稼ぐこと。
+LoRA入れた状態で、未処理だった 62 commit を遡って評価し直した（**バックフィル** = 過去のデータをあとから埋める作業）。狙いは Stage 2 用の高品質データを稼ぐこと。
 
 これが思ったより**事故った**。
 
@@ -338,7 +342,7 @@ LoRA入れた状態で、未処理だった 62 commit を遡って評価し直�
 
 「2並列なら速くね？」と思って `OLLAMA_NUM_PARALLEL=2` にしたら、各リクエストが3倍遅くなって15分タイムアウト連発。
 
-なぜかというと、`llama3.3:70b` を NUM_PARALLEL=2 にすると **約 160GB** 必要になって半分がCPUに退避する。VRAM 80GB の GPU で 70B 4-bit を動かしてる以上、KVキャッシュ x 2 を載せた瞬間にオーバーフロー。素直に `=1` に戻した。
+なぜかというと、`llama3.3:70b` を NUM_PARALLEL=2 にすると **約 160GB** 必要になって半分がCPUに退避する。VRAM（= GPU 専用メモリ）80GB の GPU で 70B モデルを **4-bit 量子化**（= 重みを4ビットに圧縮して容量を1/4にする手法）で動かしてる以上、**KVキャッシュ**（= 推論中の中間状態を保存しておくバッファ、文脈長 × 2並列で2倍要る）を載せた瞬間にオーバーフロー。素直に `=1` に戻した。
 
 ### 事故その2: LoRA入りモデルが固まる
 
@@ -356,7 +360,7 @@ aiohttp.client_exceptions.SocketTimeoutError: Timeout on reading data from socke
 
 *いや、そういうことじゃなくて…*
 
-aiohttp の `total=900s` タイムアウトはなぜか発火しない（後で `sock_read=120s` を追加した）。Ollama log を見ると `/api/generate` の完了エントリすら出ない。内部で止まってる。
+aiohttp（= Python の HTTPクライアント）の `total=900s` タイムアウトはなぜか発火しない（後で `sock_read=120s`、= 「2分間データが来なかったら切断」のセーフティを追加した）。Ollama log を見ると `/api/generate` の完了エントリすら出ない。内部で止まってる。
 
 ### 復活：完全再起動 + pre-warm
 
@@ -404,7 +408,7 @@ Gemini からは**明確に上がった**。Claude からは横ばい〜微減�
 
 - **ペア比較できてない**: 同じ commit を両モデルで評価し直さないと、世代差か commit selection か切り分けられない
 - **Codex 評価器の死活監視がなかった**: 長時間バックフィル中に 93% NULLになっても気づかなかった
-- **Stage 2 用のサンプル数**: avg≥6.0 でフィルタすると LoRA期の export は **7件** しかない。SFT には全然足りない
+- **Stage 2 用のサンプル数**: avg≥6.0（= 採点官3人の平均6点以上）でフィルタすると LoRA期の export は **7件** しかない。SFT には全然足りない
 
 正直、Stage 2 用のデータ稼ぎという目的なら**まだ実用じゃない**。Geminiの数字だけ見ると改善してるけど、それが「いい review」なのか「Gemini好みのreview」なのかは保留。
 
@@ -432,15 +436,15 @@ Gemini からは**明確に上がった**。Claude からは横ばい〜微減�
 
 ## 追記その2：Mac M3 Ultra で同じことやってみたら全然ダメだった（2026-05-05）
 
-vast.ai で $1.70 で済んだのは確かに安いけど、手元に **M3 Ultra 96GB unified RAM** がある。70B 4-bit + LoRA は理論上ぜんぶ載る。MLX なら Apple 純正で速いはず。**同じデータ・同じ設定で回したら何分で終わる？**
+vast.ai で $1.70 で済んだのは確かに安いけど、手元に **M3 Ultra 96GB unified RAM**（= CPU と GPU が同じメモリを共有してるアーキテクチャ）がある。70B 4-bit + LoRA は理論上ぜんぶ載る。MLX（= Apple 純正の機械学習フレームワーク、Metal GPU を直接使う）なら速いはず。**同じデータ・同じ設定で回したら何分で終わる？**
 
 これがまた、地獄だった。
 
 結論を先に。
 
-- ❌ 3回挑戦して **3回とも Metal GPU error で死亡**（iter 400 / 70 / 10）
-- ❌ MLX-LM の `lr_schedule` で warmup+cosine が**設定通りに動かなかった**（mlx-lm のソース読んで原因判明）
-- ❌ ベストなadapter (iter 200, val 0.822) は v1 final 0.46 に届かず
+- ❌ 3回挑戦して **3回とも Metal GPU error で死亡**（iter 400 / 70 / 10、`iter` = 学習ループの繰り返し回数）
+- ❌ MLX-LM の `lr_schedule`（= 学習中に learning_rate を時間で動かす設定）で warmup（= LR を低い値から徐々に上げる助走区間） + cosine（= ピーク後に余弦カーブで下げる）が**設定通りに動かなかった**
+- ❌ ベストなadapter (iter 200, val 0.822、`val` = 学習に使ってない検証データでの loss) は v1 final 0.46 に届かず
 - ✅ **動くは動く** — 96GB unified RAM、70B+LoRA で peak 46GB、ハードは余裕
 - ✅ コスト $0（電気代のみ）、**ただし 6 倍遅い**（v1 35min vs Mac 3.5h+）
 
@@ -506,6 +510,14 @@ iter 200 までは収束してたが、LR が想定外に上がり続けて再�
 
 ### 原因：`iters` は **micro-step** だった
 
+ここで用語を整理させて:
+
+- **iter / step**: 学習ループの1周。1バッチを処理して終わる単位。
+- **batch**: 一度にまとめて流すデータの数。`batch_size: 2` なら2サンプル同時。
+- **gradient accumulation（grad_accum）**: メモリ節約のテク。`grad_accum_steps: 4` ならバッチ4回ぶん勾配を貯めてから1回だけ重み更新する。**実質バッチサイズは batch_size × grad_accum_steps**。
+- **micro-step**: バッチ1回を処理する最小単位。
+- **opt step（optimizer step）**: 重みが実際に更新される単位（= grad_accum 単位ぶんの micro-step ごとに1回）。
+
 mlx-lm のソースを読んだ:
 
 ```python
@@ -517,11 +529,11 @@ for it, batch in zip(range(1, args.iters + 1), iterate_batches(...)):
 
 つまり:
 
-- `iters: 408` + `grad_accumulation_steps: 4` → 実際の **optimizer step は 102 のみ**
+- `iters: 408` + `grad_accumulation_steps: 4` → 実際の **opt step は 102 のみ**
 - `warmup: 100` は **opt step** で数える → 完了は iter 100×4 = **iter 400**
 - iter 100 で観測 LR 4.8e-5 = 2e-4 × 25/100（opt step 25 = warmup 25% 地点）と完全一致
 
-なるほど。HF Trainer は `warmup_steps=100` が opt step で、`num_train_epochs=1` で計算した opt step 数のなかでの warmup。MLX は `iters` 自体が micro-step で、warmup や cosine は opt step。**同じ数字を入れたら 4倍ズレる**。
+なるほど。HF Trainer（= HuggingFace の学習ライブラリ、Unsloth が内部で使ってるやつ）は `warmup_steps=100` が opt step で、`num_train_epochs=1`（= データ全体を1周）で計算した opt step 数のなかでの warmup。MLX は `iters` 自体が micro-step で、warmup や cosine は opt step。**同じ数字を入れたら 4倍ズレる**。
 
 修正: `iters: 1636 = 409 × 4`。
 
@@ -537,7 +549,7 @@ libc++abi: terminating due to uncaught exception of type std::runtime_error:
 (00000005:kIOGPUCommandBufferCallbackErrorInnocentVictim)
 ```
 
-**`kIOGPUCommandBufferCallbackErrorInnocentVictim`**。直訳すると「無実の犠牲者」。GPU 上で他の何かが死んだ巻き添えで自分も殺された、みたいな意味。
+**`kIOGPUCommandBufferCallbackErrorInnocentVictim`**。直訳すると「無実の犠牲者」。Metal（= Apple の GPU API、CUDA の Apple版） で他の処理が死んだ巻き添えで、こっちのコマンドバッファ（= GPU に投げた命令の塊）まで kill されたみたいな意味。
 
 `save_every: 25` に縮めて再々挑戦したら **iter 10 で同じエラー**。劣化してる。
 
@@ -568,9 +580,9 @@ libc++abi: terminating due to uncaught exception of type std::runtime_error:
 
 ### 教訓
 
-1. **`iters` の単位はフレームワーク依存**: HF Trainer は opt step、MLX-LM は micro-step。grad accumulation 入れると 4倍ズレる
-2. **lr_schedule は実機で LR ログをまず見る**: 観測した LR 値が想定値と桁違いなら設定間違い
-3. **Metal GPU error は config では治らない**: ハードがイケても OS/driver レベルで shed される。長時間 sustained 70B 計算は M3 Ultra でもまだギリギリ
+1. **`iters` の単位はフレームワーク依存**: HF Trainer は opt step、MLX-LM は micro-step。grad accumulation を入れると 4倍ズレる
+2. **lr_schedule は実機で LR ログをまず見る**: 観測した LR の数字が想定と桁違いなら設定間違い。コードに書いた値ではなく、走らせた結果を信じる
+3. **Metal GPU error は config では治らない**: ハードがイケても OS / driver レベルで kill される。長時間連続で 70B を回すのは M3 Ultra でもまだギリギリ
 4. **MLX エコシステムは Unsloth に追いつけてない**: ドキュメント、エラーメッセージ、ベストプラクティス。**1〜2年は cloud 一択**
 
 ベスト adapter（iter 200, val 0.822）は手元に残ったので、Stage 2 比較用に Ollama に組み込んで採点官3人に評価させれば、品質差が定量化できる。それは次回。

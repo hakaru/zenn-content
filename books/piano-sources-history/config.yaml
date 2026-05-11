@@ -1,0 +1,14 @@
+title: "サンプリングと物理モデルの間で — 8週間で5本のピアノ音源を作った話"
+summary: "Raspberry Pi 5の elepiano から iOS の iRhodes、純物理モデルの TineModeler、DDSP残差学習の TineModeler2、そして AUv3 製品版 RhoDex まで。サンプリング・物理モデリング・機械学習の三層をどう混ぜるかを試行錯誤した記録。"
+topics: ["audio", "swift", "cpp", "coreml", "ios"]
+published: false
+price: 0
+chapters:
+  - introduction
+  - elepiano
+  - irhodes
+  - tinemodeler
+  - tinemodeler2
+  - tinemodeler3
+  - evolution
+  - lessons

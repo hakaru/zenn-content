@@ -3,7 +3,7 @@ title: "ローカルLLMって本当に開発に使える？（番外編）ベク
 emoji: "🗄️"
 type: "tech"
 topics: ["tidb", "rag", "llm", "vectordatabase", "swift"]
-published: false
+published: true
 ---
 
 iOS/macOS アプリを個人開発。

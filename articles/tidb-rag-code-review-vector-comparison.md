@@ -6,7 +6,7 @@ topics: ["tidb", "rag", "llm", "vectordatabase", "swift"]
 published: false
 ---
 
-iOS/macOS アプリを個人開発している。最近リリースしたのが 2 本。
+iOS/macOS アプリを個人開発。
 
 **1Take** — 練習録音用 iOS アプリ。録音ボタン1つで LA-2A / 1176 系のリアルタイムコンプレッサーが乗って、DAW なしで「録りながら良い音」になる。
 
@@ -16,7 +16,7 @@ https://apps.apple.com/us/app/1take/id6757945099
 
 https://testflight.apple.com/join/BAtGszPw
 
-この M2DX の開発中に「ローカル LLM でコードレビューを自動化できないか」を試し始めたのが、このシリーズの始まり。
+この M2DX の開発中に「ローカル LLM でコードレビューを自動化できないか」を試し始めたのが始まり。
 
 ---
 
@@ -25,7 +25,7 @@ https://testflight.apple.com/join/BAtGszPw
 
 - **M2DX** — iOS/macOS 向け MIDI 2.0 対応 DX7 互換 FM シンセサイザーアプリ。[TestFlight 公開ベータ](https://testflight.apple.com/join/BAtGszPw) で試せる
 - **M2DX-Core** — M2DX の DX7 互換エンジン部分。Pure Swift、Apache 2.0 で OSS 公開
-- **MIDI2Kit** — M2DX-Core が依存する Swift 製 MIDI 2.0 ライブラリ
+- **MIDI2Kit** — M2DX-Core が依存する Swift 製 MIDI 2.0 ライブラリ　
 - **M2LoRA** — 上記リポジトリのコミットを自動レビュー・採点・合成し、LoRA 学習データを貯めるパイプライン（private）
 :::
 
@@ -37,7 +37,7 @@ M3 Ultra + Ollama でローカル LLM を Swift/MIDI プロジェクトの開発
 
 **52 件指摘、真陽性 0 件**。
 
-しかもその理由が笑えなくて、「Swift をわかってない」が根本原因だった。具体的には:
+しかもその理由が...「Swift をわかってない」が根本原因だった。具体的には:
 
 - `(Op, Op, Op, Op, Op, Op)` という tuple を「ヒープ確保された Array」と判定して "リアルタイムスレッドで Array 生成するな" と指摘してくる
 - `level = level &- inc` の `&-` を「overflow チェックが抜けてる」と言う。Swift で `&-` は **意図的に wrap させる**演算子で、むしろ「ラップしてほしいから `&-` と書いてる」のに
@@ -66,7 +66,8 @@ M3 Ultra + Ollama でローカル LLM を Swift/MIDI プロジェクトの開発
 
 （２）の RAG は「Swift の言語仕様」を注入した。でも今手元にある 421 件は、**実際の Swift/MIDI コードに対して、実際にどんなレビューをすべきかを示す事例**だ。仕様書とは違う種類の情報で、「こういう diff にはこういう観点で見るといい」という具体的なパターン集になっている。
 
-これをRAGに入れたら何か変わるのか？ 試した。
+これをRAGに入れたら何か変わるのか？ 
+ベクトルDBの評価をやってみたかったのが本音か。書くDBは導入は非常にカンタンに終了（省略）
 
 ---
 
@@ -119,7 +120,7 @@ CREATE TABLE reviews (
 
 421 件の embedding 移行は約 10 分で終わった。
 
-**が、すぐ詰まった。**
+続きは、はまるどころを書くと評価が上がると聞いたので。。。
 
 最初に書いたクエリ:
 

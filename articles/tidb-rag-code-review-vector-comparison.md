@@ -6,6 +6,20 @@ topics: ["tidb", "rag", "llm", "vectordatabase", "swift"]
 published: false
 ---
 
+ピアノを弾きながら iOS/macOS アプリを個人開発している。最近リリースしたのが 2 本。
+
+**1Take** — 練習録音用 iOS アプリ。録音ボタン1つで LA-2A / 1176 系のリアルタイムコンプレッサーが乗って、DAW なしで「録りながら良い音」になる。自分がピアノの練習録音で欲しかったものをそのまま作った。
+
+https://apps.apple.com/us/app/1take/id6757945099
+
+**M2DX** — iOS/macOS 向け MIDI 2.0 対応 DX7 互換 FM シンセサイザー。TestFlight で公開ベータ配布中なので、MIDI 2.0 環境がある方はぜひ試してフィードバックをもらえると嬉しい。
+
+https://testflight.apple.com/join/BAtGszPw
+
+この M2DX の開発中に「ローカル LLM でコードレビューを自動化できないか」を試し始めたのが、このシリーズの始まり。
+
+---
+
 :::message
 **この記事の対象プロジェクト**
 

@@ -6,17 +6,17 @@ topics: ["tidb", "rag", "llm", "vectordatabase", "swift"]
 published: true
 ---
 
-iOS/macOS アプリを個人開発。
+iOS/macOS アプリを個人開発している。最近リリースしたのが 2 本。
 
 **1Take** — 練習録音用 iOS アプリ。録音ボタン1つで LA-2A / 1176 系のリアルタイムコンプレッサーが乗って、DAW なしで「録りながら良い音」になる。
 
 https://apps.apple.com/us/app/1take/id6757945099
 
-**M2DX** — iOS/macOS 向け MIDI 2.0 対応 DX7 互換 FM シンセサイザー。TestFlight で公開ベータ配布中なので、MIDI 2.0 環境がある方はぜひ試してフィードバックをもらえると嬉しい。
+**M2DX** — iOS/macOS 向け MIDI 2.0 対応 DX7 互換 FM シンセサイザー。TestFlight で公開ベータ配布中。
 
 https://testflight.apple.com/join/BAtGszPw
 
-この M2DX の開発中に「ローカル LLM でコードレビューを自動化できないか」を試し始めたのが始まり。
+この M2DX の開発中に「ローカル LLM でコードレビューを自動化できないか」を試し始めたのがシリーズの始まり。
 
 ---
 
@@ -25,75 +25,63 @@ https://testflight.apple.com/join/BAtGszPw
 
 - **M2DX** — iOS/macOS 向け MIDI 2.0 対応 DX7 互換 FM シンセサイザーアプリ。[TestFlight 公開ベータ](https://testflight.apple.com/join/BAtGszPw) で試せる
 - **M2DX-Core** — M2DX の DX7 互換エンジン部分。Pure Swift、Apache 2.0 で OSS 公開
-- **MIDI2Kit** — M2DX-Core が依存する Swift 製 MIDI 2.0 ライブラリ　
+- **MIDI2Kit** — M2DX-Core が依存する Swift 製 MIDI 2.0 ライブラリ
 - **M2LoRA** — 上記リポジトリのコミットを自動レビュー・採点・合成し、LoRA 学習データを貯めるパイプライン（private）
 :::
 
 ## 前回までのあらすじ
 
-M3 Ultra + Ollama でローカル LLM を Swift/MIDI プロジェクトの開発に使い倒している。
+M3 Ultra (96GB) + Ollama でローカル LLM を Swift/MIDI プロジェクトの開発に使い倒している。
 
 まず（１）でローカル LLM 10 機種に DX7 エンジンの監査をさせた。
 
 **52 件指摘、真陽性 0 件**。
 
-しかもその理由が...「Swift をわかってない」が根本原因だった。具体的には:
+しかも失敗の理由が「Swift をわかってない」だった。具体的には:
 
-- `(Op, Op, Op, Op, Op, Op)` という tuple を「ヒープ確保された Array」と判定して "リアルタイムスレッドで Array 生成するな" と指摘してくる
-- `level = level &- inc` の `&-` を「overflow チェックが抜けてる」と言う。Swift で `&-` は **意図的に wrap させる**演算子で、むしろ「ラップしてほしいから `&-` と書いてる」のに
-- `qrate = min(63, qrate + rateScaling)` で上限を貼った 3 行後に「`qrate >> 2` が大きくなりすぎて overflow します」と来る。**`min(63, ...)` 何のためにあると思ってんの…**
+- `(Op, Op, Op, Op, Op, Op)` という tuple を「ヒープ確保された Array」と判定して *"リアルタイムスレッドで Array 生成するな"* と指摘してくる
+- `level = level &- inc` の `&-` を「overflow チェックが抜けてる」と言う。Swift で `&-` は**意図的に wrap させる**演算子なのに
+- `qrate = min(63, qrate + rateScaling)` で上限を貼った 3 行後に「`qrate >> 2` が大きくなりすぎて overflow します」と来る。*`min(63, ...)` 何のためにあると思ってんの…*
 - 行番号を平気で捏造する。`DX7Operator.swift` は 85 行しかないのに "L100-L120" を引用してくる
 
-これは「モデルが弱い」というより **学習データ中の Swift コードが薄い**のが原因で、特に DSP・固定小数点・リアルタイム制約みたいな「Apple アプリ寄りでない Swift」はさらに希少。C/C++ で覚えたパターンをそのまま当ててくる感じ。
+C/C++ で覚えたパターンをそのまま当ててくる感じ。学習データ中の Swift コードが薄いのが本質で、DSP・固定小数点・リアルタイム制約みたいな「Apple アプリ寄りでない Swift」はさらに希少。
+
+（２）では Swift Programming Language Book + Swift Evolution proposals をベクトル DB に入れ、`&+` や `tuple` が出てきたときに関連する仕様ページを動的に引いてプロンプトに差し込む RAG を試した。**Swift セマンティクス系の誤検出が -76%**。`&+`/`&-` の誤読は完全消滅。でも TP は依然 0。
+
+（５）では「コミットのたびに自動でレビュー・採点・合成が走るパイプライン」を作った。Claude / Codex / Gemini の合議で高品質なレビューを合成し続けて、**421 件**が蓄積された。
 
 ---
 
-（２）では Swift Programming Language Book + Swift Evolution proposals を chunk に分けてベクトル DB に入れ、コードに `&+` や `tuple` が出てきたときに関連する仕様ページを動的に retrieval してプロンプトに差し込む RAG を試した。
+ここで思ったことがある。
 
-結果: **Swift セマンティクス系の誤検出が -76%**。`&+`/`&-` の誤読は完全消滅した。
+（２）の RAG は「Swift の言語仕様」を注入した。でも手元の 421 件は「実際の Swift/MIDI コードに対して、どんなレビューをすべきかの事例」だ。仕様書とは違う種類の情報で、「こういう diff が来たらこういう観点で見る」という具体的なパターン集になっている。
 
-でも **TP は依然 0**。
+**これを RAG に入れたら何か変わるか？**
 
-「Swift を知らない」という問題は仕様書 RAG でかなり抑えられた。ただしそれは「誤った指摘をしなくなる」方向の改善で、「本物のバグを見つける能力」は別軸。
-
----
-
-さらに（５）では「コミットのたびに自動でレビュー・採点・合成が走るパイプライン」を作った。Claude / Codex / Gemini に同じ diff を投げて採点させ、合議で高品質なレビューを合成する仕組み。
-
-421 件の Swift/MIDI コードレビューが蓄積された。
-
-**ここで一つ気づいた。**
-
-（２）の RAG は「Swift の言語仕様」を注入した。でも今手元にある 421 件は、**実際の Swift/MIDI コードに対して、実際にどんなレビューをすべきかを示す事例**だ。仕様書とは違う種類の情報で、「こういう diff にはこういう観点で見るといい」という具体的なパターン集になっている。
-
-これをRAGに入れたら何か変わるのか？ 
-ベクトルDBの評価をやってみたかったのが本音か。書くDBは導入は非常にカンタンに終了（省略）
+ついでに「どのベクトル DB を使うか」も気になっていたので、**TiDB Serverless / ChromaDB / Pinecone Serverless の 3 択**で同じデータを入れて比較することにした。さらに TiDB の「SQL + ベクトル統合」を活かした**品質重み付き RAG** も試した。
 
 ---
 
-## やったこと
-
-新しい diff が来たとき、**ベクトル検索で類似した過去 diff を引いてきて、そのレビュー例をプロンプトに差し込む**。
+## 構成
 
 ```
 新しい diff
-  └─► bge-large（= BERT 系の embedding モデル、1024 次元）で diff をベクトル化
+  └─► bge-large（1024 次元）で diff をベクトル化
         └─► ベクトル DB で類似 diff を検索（上位 2 件）
               └─► 類似 diff のレビュー例をプロンプト先頭に注入
                     └─► llama3.3:70b-m2lora-v1 がレビュー生成
                           └─► Claude / Codex / Gemini が採点
 ```
 
-ベクトル DB は 3 種類で試した:
+比較条件は 5 つ:
 
-| 条件 | DB |
+| 条件 | 内容 |
 |---|---|
 | RAGなし | diff をそのまま LLM へ |
-| TiDB RAG | TiDB Serverless（HNSW インデックス） |
-| Chroma RAG | ChromaDB（ローカル） |
-| Pinecone RAG | Pinecone Serverless |
-
-同じ 421 件を 3 つ全部に入れて、同じ 20 件の実コミットに対して 4 条件のレビューを生成・採点する。
+| TiDB | TiDB Serverless（HNSW）で類似検索 |
+| Chroma | ChromaDB（ローカル）で類似検索 |
+| Pinecone | Pinecone Serverless で類似検索 |
+| TiDB 重み付き | `dist / avg_score` で品質 × 類似度の複合ランキング |
 
 ---
 
@@ -111,6 +99,8 @@ CREATE TABLE reviews (
     code_diff       MEDIUMTEXT    NOT NULL,
     synthesized_review MEDIUMTEXT,
     claude_score    FLOAT,
+    codex_score     FLOAT,
+    gemini_score    FLOAT,
     flagged         TINYINT(1)    DEFAULT 0,
     diff_embedding  VECTOR(1024),
     VECTOR INDEX idx_diff_emb ((VEC_COSINE_DISTANCE(diff_embedding)))
@@ -120,21 +110,18 @@ CREATE TABLE reviews (
 
 421 件の embedding 移行は約 10 分で終わった。
 
-続きは、はまるどころを書くと評価が上がると聞いたので。。。
-
-最初に書いたクエリ:
+**が、最初のクエリですぐ詰まった。**
 
 ```sql
 SELECT ... FROM reviews
 WHERE flagged = 0
-  AND diff_embedding IS NOT NULL
 ORDER BY VEC_COSINE_DISTANCE(diff_embedding, %s) ASC
-LIMIT %s
+LIMIT 10
 ```
 
-これを実行するとエラーになる。TiDB Serverless v8.5.3 時点で、**HNSW インデックスは `WHERE` フィルタと一緒に使えない**。ANN 検索（= Approximate Nearest Neighbor、近似的に近い順に高速取得する方式）とメタデータフィルタの組み合わせは未サポート。
+エラーになる。TiDB Serverless v8.5.3 時点で **HNSW インデックスは `WHERE` フィルタと組み合わせられない**。ANN 検索（= Approximate Nearest Neighbor、近似的に近い順を高速取得する方式）とメタデータフィルタの同時使用は未サポート。
 
-回避: `top_k × 5` 件をフィルタなしで取ってきて、Python 側で絞る。
+回避策: フィルタなしで `top_k × 5` 件を多めに取ってきて、Python 側で絞る。
 
 ```python
 sql = """
@@ -149,7 +136,7 @@ cur.execute(sql, (vec_str, top_k * 5))
 rows = [r for r in cur.fetchall() if r["synthesized_review"] and not r["flagged"]][:top_k]
 ```
 
-*余分に取って捨てる。行儀は悪いが、421 件規模なら実用上は問題ない。*
+*余分に取って Python で捨てる。行儀は悪いが、421 件規模なら実用上は問題ない。*
 
 ### ChromaDB（ローカル）
 
@@ -163,7 +150,7 @@ collection = client.get_or_create_collection(
 )
 ```
 
-以上。`pip install chromadb` して 3 行。WHERE フィルタと ANN の同時使用も問題ない。セットアップコストはほぼゼロ。
+以上。`pip install chromadb` して 3 行。WHERE フィルタと ANN の同時使用も問題なし。セットアップコストはほぼゼロ。
 
 ### Pinecone Serverless
 
@@ -180,11 +167,11 @@ pc.create_index(
 index = pc.Index("m2lora-reviews")
 ```
 
-Starter プランはリージョンが `us-east-1` 固定で、東京からのレイテンシが 3 つの中で一番大きい。あと Pinecone は**類似度（1 = 完全一致）を返す**ので、距離に変換するときに `1 - score` が必要。これを忘れると「遠いほど良い」が逆転する。
+Starter プランはリージョンが `us-east-1` 固定で、東京からのレイテンシが 3 つの中で一番大きい。Pinecone は**類似度（1 = 完全一致）を返す**ので、距離に変換するときに `1 - score` が必要。これを忘れると「遠いほど良い」が逆転する。
 
 ---
 
-## embedding まわりのハマり
+## embedding のハマり
 
 ### bge-large の 512 トークン制限
 
@@ -212,45 +199,27 @@ async def embed(text: str) -> list[float]:
 
 1200 → 800 → 500 → 300 文字と縮めていって成功したら返す。実際には 1200 文字でほぼ通る。
 
-### RAG 注入の方法
+### RAG 注入
 
-類似 diff 上位 2 件の `synthesized_review`（= Claude が 3 者評価を統合して作った合成レビュー）をプロンプトの頭に差し込む。
+類似 diff 上位 2 件の `synthesized_review`（= Claude が 3 者評価を統合して作った合成レビュー）をプロンプトの頭に差し込む。「参考」と明示しているので、モデルはそのままコピーせず観点を引き継ぐ形で書く。
 
 ```python
-_RAG_SECTION = """\
+prompt = f"""\
+あなたはSwift/MIDIコードレビューの専門家です。
 === 類似コードの過去レビュー例（参考） ===
 {examples}
 === END ===
 
-"""
-
-async def review_diff(diff: str, use_rag: bool = True) -> str:
-    rag_context = ""
-    if use_rag:
-        similar = await find_similar(diff, top_k=2)
-        if similar:
-            examples = "\n".join(
-                f"--- 例{i+1} ---\n{r.synthesized_review[:400]}"
-                for i, r in enumerate(similar)
-            )
-            rag_context = _RAG_SECTION.format(examples=examples)
-
-    prompt = f"""\
-あなたはSwift/MIDIコードレビューの専門家です。
-{rag_context}
 === コードdiff ===
 {diff}
 === END ===
 
 レビュー:"""
-    return await _generate(prompt)
 ```
-
-「参考」と明示しているので、モデルはそのままコピーはせず、似た観点を自分の言葉でアレンジして書く。実際に見ると、文面ではなく観点が引き継がれている感じだった。
 
 ---
 
-## 実測比較（20 件）
+## 実測比較① — DB 3択 × 20 件
 
 M2DX・MIDI2Kit の実コミット 20 件をランダムサンプリング。各 commit に 4 条件のレビューを生成し、Claude / Codex / Gemini の平均スコアで評価した。
 
@@ -287,108 +256,112 @@ M2DX・MIDI2Kit の実コミット 20 件をランダムサンプリング。各
 | **平均Δ** | — | +1.03 | +1.50 | **+1.60** |
 | **改善件数** | — | 13/20 (65%) | 12/20 (60%) | **15/20 (75%)** |
 
+全 DB で改善した。Pinecone が数字上は最良だが、**サンプル 20 件なので差は誤差の範囲**とも言える。
+
+### 逆効果になったケース
+
+`9fd81f6`（M2DX、NaN ガード追加）はノーRAG **7.33** → TiDB **3.67** と大きく下がった。注入された類似レビューが「Swift の `isNaN` チェックはオーバーヘッドがある」という内容で、このコードには完全に無関係。**ベクトルが近くても、注入する情報が的外れになることはある**。元から高スコアな diff に RAG を足してもノイズになるだけ、という傾向があった。
+
 ---
 
-## 何が起きているか
+## 実測比較② — TiDB 固有機能：品質重み付き RAG
 
-### 仕様書 RAG との違い
+3 DB の比較だけで終わるのも味気ないので、TiDB でしかできないことを試した。
 
-（２）の仕様書 RAG は「LLM が Swift を知らない」という問題を攻めた。`&+` は wrap 演算子だという仕様を与えれば、LLM は `&+` を誤解しなくなる。
+### 発想
 
-今回の「過去レビュー RAG」は違う軸で効く。仕様書は「この言語構文はこう動く」という**静的な知識**だが、過去レビューは「この commit パターンにはこういう観点で見ると質問が出る」という**事例ベースの判断**だ。たとえば「MIDI2Kit の Protocol Negotiation 周りのコードが来たら、タイムアウト伝播の確認を必ず入れる」みたいな暗黙知が、過去レビューには含まれている。
+純粋な類似度検索は「最も似た diff のレビュー」を引いてくる。でも「似ているが採点が低い（= 質が悪い）レビュー」が混じる可能性がある。
 
-採点が平均 **+1〜+1.6 点**改善した主因は、こうした事例からの観点引き継ぎで、LLM が「的外れな指摘」を減らす方向に動いた結果と見ている。
+TiDB なら SQL でベクトル距離とスコアを同時に計算して **`dist / avg_score` で複合ランキング**できる。これは Chroma や Pinecone だと「ANN で取ってから Python で再ランキング」の 2 段になるが、TiDB は 1 クエリで完結する。
 
-### RAGなしでも高スコアな commit には効かない
+```sql
+SELECT commit_hash, code_diff, synthesized_review,
+       VEC_COSINE_DISTANCE(diff_embedding, %s) AS dist,
+       (claude_score + codex_score + gemini_score) / 3.0 AS avg_score,
+       VEC_COSINE_DISTANCE(diff_embedding, %s) /
+           NULLIF((claude_score + codex_score + gemini_score) / 3.0, 0)
+           AS weighted_dist
+FROM reviews
+WHERE diff_embedding IS NOT NULL
+  AND synthesized_review IS NOT NULL
+  AND claude_score IS NOT NULL
+  AND (claude_score + codex_score + gemini_score) / 3.0 >= 4.0
+ORDER BY weighted_dist ASC
+LIMIT %s
+```
 
-改善しなかった 5〜7 件を見ると、**RAGなしのスコアが既に 7 点以上**のパターンが多い。元から良いレビューに RAG コンテキストを足してもノイズにしかならない。
+`weighted_dist` が小さいほど「類似していて品質が高い」。HNSW + WHERE の制限がある通常クエリと違い、これはフルスキャンになるが WHERE フィルタを SQL 側で完結できる。
 
-`9fd81f6`（M2DX、NaN ガード追加）が顕著で、RAGなし **7.33** → TiDB **3.67** と大きく下がった。注入された類似レビューが「Swift の `isNaN` チェックはオーバーヘッドがある」という内容で、このコードには完全に無関係だった。**類似ベクトルが近くても注入情報が的外れになることはある**。
+### 結果（10 件）
 
-### `&+` 誤読や tuple 誤判定は改善されたか？
+| commit | project | RAGなし | TiDB（生距離） | TiDB（重み付き） |
+|---|---|---|---|---|
+| 2f25b04 | M2DX | 5.00 | 6.00 | 6.00 |
+| 761ff5f6 | MIDI2Kit | 3.00 | **7.00** | 6.00 |
+| 9fd81f6 | M2DX | 3.00 | **7.00** | 6.00 |
+| 1be38940 | M2DX | 2.00 | **7.00** | 4.00 |
+| 1aa496f4 | MIDI2Kit | 4.00 | 6.00 | 6.00 |
+| a6dd8188 | MIDI2Kit | 3.00 | 5.00 | **6.00** |
+| faeb721c | M2DX | 3.00 | **5.50** | 4.00 |
+| 53ba4f3f | M2DX | 4.00 | 5.50 | 5.50 |
+| 1be38940 | M2DX | 4.00 | **7.00** | 6.50 |
+| 93580685 | MIDI2Kit | 3.00 | 6.50 | **7.00** |
 
-仕様書 RAG のときは `&+` 系が完全消滅した。今回の過去レビュー RAG では、仕様書を入れているわけではないので Swift 構文の誤読に対する直接的な改善はない。ただ「過去の良質なレビューを参考にする」という文脈が入ることで、LLM が「的外れに見える指摘は書かない」方向に引っ張られる副作用はある。
+| | RAGなし | TiDB（生距離） | TiDB（重み付き） |
+|---|---|---|---|
+| **平均スコア** | 3.40 | **6.25** | 5.70 |
+| **平均Δ** | — | **+2.85** | +2.30 |
+| **Weighted > 生距離** | — | — | **2/10件** |
 
-純粋に「Swift を教える」なら仕様書 RAG。「実際のコードパターンに対する判断を安定させる」なら過去レビュー RAG。組み合わせが最強候補。
+**重み付きの方が低かった。** 生距離が 10/10 で改善（全勝）に対して、重み付きも 10/10 で改善するが、平均スコアは生距離より -0.55 点。
 
-### TiDB vs Chroma vs Pinecone
+### なぜ逆効果か
+
+仮説は「**スコアが高い ≠ 文脈が合う**」だ。
+
+`weighted_dist = dist / avg_score` は「スコアが高いレビュー」を強く引き寄せる。高スコアなレビューは往々にして「典型的で整ったコードへのレビュー」で、今の diff とコードパターンが違っていても数値上は有利になる。
+
+一方、純粋な類似度は「最も似た diff のレビュー」を取ってくる。コードパターンが近ければ、レビューの観点も自然と文脈に合いやすい。
+
+`1be38940` で顕著で、重み付きで注入された 2 件目が `avg=4.7` と低めだった（フィルタの下限 4.0 ギリギリ）。品質フィルタを通した上でスコアを重み付けしているのに、それでも文脈がズレたものが入ってきた。
+
+*「品質が高い事例が参考になる」は人間の直感では正しいが、RAG では「文脈が近い事例が参考になる」の方が勝った。*
+
+---
+
+## DB 選択の整理
 
 | 観点 | TiDB | Chroma | Pinecone |
 |---|---|---|---|
-| 平均Δ | +1.03 | +1.50 | **+1.60** |
+| 20件比較 平均Δ | +1.03 | +1.50 | **+1.60** |
 | 改善率 | 65% | 60% | **75%** |
-| セットアップ | クラウド（要SSL） | ローカル（最簡単） | クラウド |
-| 無料枠 | Serverless 5GiB | 制限なし（ローカル） | Starter 2GiB |
-| HNSW WHERE 制限 | **あり（要回避）** | なし | なし |
+| セットアップ | クラウド（要SSL） | **ローカル（最簡単）** | クラウド |
+| 無料枠 | Serverless 5GiB | 制限なし | Starter 2GiB |
+| HNSW + WHERE | **未サポート（v8.5.3）** | サポート | サポート |
+| SQL + ベクトル統合 | **◎（同一クエリ）** | △ | △ |
 | レイテンシ | 中（AWS Tokyo） | **最小（ローカル）** | 大（us-east-1） |
 
-スコアで Pinecone がわずかに上だが、**サンプル 20 件なので差は誤差の範囲**と見ている。選択の決め手はスコアより実用上の要件に依存する。
+スコア差は誤差範囲だが、使い分けの感触は明確にある:
 
-セットアップのしやすさで言うと Chroma が圧倒的に楽。`pip install chromadb` だけで動く。TiDB と Pinecone はクレデンシャル管理・SSL・API キーが必要で、動くまでに数十分かかった。
+- **プロトタイプ・ローカル開発** → **Chroma**（pip install だけ）
+- **チーム共有・スケールアウト** → **TiDB or Pinecone**
+- **既存アプリに SQL と統合・複雑な絞り込み** → **TiDB**（MySQL 互換、JOIN・集計がそのまま使える）
 
-### TiDB を使う理由: SQL とベクトルの統合
-
-スコアは 3 番手でも、このパイプラインとの相性でいうと TiDB がいちばん都合がいい。
-
-ベクトル検索と通常の SQL を**同一クエリで書ける**。
-
-```sql
--- スコアが高くて類似した diff を取ってくる
-SELECT id, synthesized_review,
-       VEC_COSINE_DISTANCE(diff_embedding, %s) AS dist
-FROM reviews
-WHERE claude_score >= 7.0
-ORDER BY dist ASC
-LIMIT 5;
-```
-
-（HNSW と `WHERE` の同時使用はできないので、このクエリはフルスキャン側で動く。ANN での高速検索ではなく exact search になる点は注意。件数が増えてきたら要検討。）
-
-Chroma や Pinecone ではメタデータフィルタと ANN の同時使用に制約があるが、TiDB は SQL の表現力がそのまま使える。`review_model` 別の集計、`flagged` 状態の管理、プロジェクト別スコア比較——全部 SQL で書ける。M2LoRA パイプライン全体が SQLite ベースで動いているので、その延長線上に TiDB がある、という感覚。
-
-:::message
-HNSW + WHERE の制限は v8.5.3 時点の話。将来のバージョンで解消されるかもしれないので、使う前に確認。
-:::
-
----
-
-## 仕様書 RAG と過去レビュー RAG の比較
-
-この記事で試したものを（２）と並べると:
-
-| 観点 | （２）仕様書 RAG | 今回：過去レビュー RAG |
-|---|---|---|
-| 入れたもの | Swift Book + Evolution proposals | 過去の実コードレビュー 421 件 |
-| 効く問題 | `&+` / tuple などの Swift 構文誤読 | 的外れな観点・文脈ずれな指摘 |
-| `&+` 誤読 | **完全消滅** | 変化なし（仕様書を入れていない） |
-| 平均スコア改善 | 未測定（FP件数で評価） | **+1.0〜+1.6 点** |
-| 組み合わせ | ← 両方入れたら最強候補 | → |
-
----
-
-## 選択指針
-
-どの DB を選んでもスコア差は誤差に近い。決め手はユースケース:
-
-- **プロトタイプ・ローカル開発** → **Chroma**（pip install だけ、ゼロ設定）
-- **チーム共有・スケールアウト** → **TiDB or Pinecone**（マネージドで永続化不要）
-- **既存アプリに SQL と統合** → **TiDB**（MySQL 互換、JOIN や集計がそのまま使える）
+TiDB は「スコアが高くて類似した diff だけ引いてくる」「世代別・プロジェクト別のスコア集計」「フラグ管理」といった、SQL の表現力が必要な操作をベクトル検索と組み合わせて一発で書ける。今回の重み付き実験でスコア上は裏目に出たが、管理クエリとしての使い道は依然として強い。
 
 ---
 
 ## まとめ
 
-| やったこと | 結果 |
+| 実験 | 結果 |
 |---|---|
-| 421 件のレビューを TiDB / Chroma / Pinecone に移行 | bge-large 1024 次元 embed、10 分以内 |
-| 4 条件 × 20 commit で比較 | 全 DB で RAGなし比 +1.0〜+1.6 点 |
-| Pinecone が数字は最良 | 改善率 75%、平均 +1.60 |
-| （２）仕様書 RAG との違いが明確 | 仕様書 → Swift 構文誤読に効く、過去レビュー → 的外れ指摘に効く |
-| HNSW + WHERE は未サポート（v8.5.3） | top_k × 5 取得 → Python フィルタで回避 |
+| 421 件のレビューを 3 DB に移行して比較 | 全 DB で RAGなし比 +1.0〜+1.6 点改善 |
+| 3 DB のスコア差 | Pinecone 微差で最良、ただし誤差範囲 |
+| TiDB 品質重み付き RAG | 生距離より -0.55 点（逆効果） |
+| 逆効果の理由 | 「品質が高い」 > 「文脈が近い」は RAG では成立しなかった |
+| TiDB の強みが出る場面 | SQL + ベクトルの管理クエリ（スコア集計・フラグ管理・世代別分析） |
 
-「まず Chroma で試して、スケールが必要になったら TiDB / Pinecone へ」が現実的な移行パス。
-
-仕様書 RAG と過去レビュー RAG を組み合わせたら、互いに別軸の問題を補えるので、次はその組み合わせを試したい。
+（２）の仕様書 RAG（Swift 構文の誤読を抑える）と今回の過去レビュー RAG（的外れな観点を抑える）は別軸の問題に効くので、組み合わせが次の候補。
 
 ---
 

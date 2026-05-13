@@ -1,5 +1,5 @@
 ---
-title: "ローカルLLMって本当に開発に使える？（番外編）「仕様書RAG」の次を試した — 過去レビューをTiDB/Chroma/Pineconeで引いてきたら幻覚が減った"
+title: "ローカルLLMって本当に開発に使える？（番外編）TiDB/Chroma/Pineconeで過去レビューをRAG注入したら幻覚が減った"
 emoji: "🗄️"
 type: "tech"
 topics: ["tidb", "rag", "llm", "vectordatabase", "swift"]

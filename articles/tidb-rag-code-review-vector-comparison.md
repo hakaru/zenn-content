@@ -1,54 +1,61 @@
 ---
-title: "ローカルLLMのコードレビューをRAGで強化する — TiDB / Chroma / Pinecone 3択比較（20件実測）"
+title: "ローカルLLMって本当に開発に使える？（番外編）過去レビューをRAGで注入したら幻覚が減った — TiDB/Chroma/Pinecone 3択比較"
 emoji: "🗄️"
 type: "tech"
 topics: ["tidb", "rag", "llm", "vectordatabase", "swift"]
 published: false
 ---
 
-# ローカルLLMのコードレビューをRAGで強化する — TiDB / Chroma / Pinecone 3択比較
+:::message
+**この記事の対象プロジェクト**
 
-## はじめに
+- **M2DX** — iOS/macOS 向け MIDI 2.0 対応 DX7 互換 FM シンセサイザーアプリ。[TestFlight 公開ベータ](https://testflight.apple.com/join/BAtGszPw) で試せる
+- **MIDI2Kit** — M2DX-Core が依存する Swift 製 MIDI 2.0 ライブラリ
+- **M2LoRA** — 上記リポジトリのコミットを自動でレビュー・採点・合成し、LoRA 学習データを貯めるパイプライン。[github.com/hakaru/M2LoRA](https://github.com/hakaru/M2LoRA)
+:::
 
-ローカルLLMにコードレビューをさせると、**幻覚（Hallucination）** が混入することがある。「`@Bindable`はSwift 5.9で非推奨」「このキャストはオーバーフローの危険がある」——どちらも間違いだ。指摘が具体的に見えるほど、間違いに気づきにくい。
+## 前回までのあらすじ
 
-この問題を解決するために試みたのが、**過去の高品質レビューをベクトル検索で取得し、プロンプトに注入するRAGパイプライン**だ。
+このシリーズでは M3 Ultra (96GB) + Ollama でローカル LLM を Swift/MIDI プロジェクトの開発に使い倒している。
 
-本記事では、Swiftコードレビューの自動収集・評価システム **M2LoRA** を題材に、同一のdiffに対して次の4条件でローカルLLMのレビュー品質を比較する。
+- **（１）監査**: llama3.3:70b 他 10 モデルで DX7 エンジンを監査 → 指摘 52 件・真陽性 0 件
+- **（２）RAG**: Swift 仕様書をベクトル DB に入れて検索させる → 誤検知 76% 削減
+- **（３）aider**: ツール統合でコーディングアシスト → 参照軸は改善、知識軸は依然ダメ
+- **（４）LoRA**: 手作り 73 件でファインチューン → 誤検知 93% 削減
+- **（５）M2LoRA パイプライン**: コミットのたびに自動でレビュー・採点・合成が走る仕組みを作った
 
-| 条件 | 説明 |
-|---|---|
-| RAGなし | diff → ローカルLLM |
-| TiDB RAG | diff → bge-large embed → **TiDB Serverless (HNSW)** → 類似diff取得 → LLM |
-| Chroma RAG | diff → bge-large embed → **ChromaDB (ローカル)** → 類似diff取得 → LLM |
-| Pinecone RAG | diff → bge-large embed → **Pinecone Serverless** → 類似diff取得 → LLM |
+（５）で「高品質レビューが自動で貯まる」仕組みができた。現在 421 件蓄積済み。
+
+問題は、**貯まったレビューを新しいレビュー生成に使えていない**ことだ。せっかく過去に Claude / Codex / Gemini が合議して作った良質なレビューがあるのに、次のレビュー時はゼロから始めている。
+
+これを解決するために、過去レビューを**ベクトル検索で取得してプロンプトに注入する RAG**（= Retrieval-Augmented Generation、外部知識を引っ張ってきて LLM の回答を補強する手法）を作った。
+
+ついでに「どのベクトル DB を使うか」問題があったので、**TiDB Serverless / ChromaDB / Pinecone Serverless の 3 択を同じデータで比較**してみた。
 
 ---
 
-## システム構成
+## アーキテクチャ
 
 ```
 git diff
   └─► review.py (llama3.3:70b-m2lora-v1, Ollama)
         ├─► [RAGなし] プロンプト直接生成
         └─► [RAGあり] retriever.py
-              ├─ bge-large:latest でdiffをembed (1024次元)
+              ├─ bge-large:latest でdiffをembed（1024次元）
               ├─ TiDB / Chroma / Pinecone で上位2件取得
               └─ 類似diff+レビュー例をプロンプトに注入
-                    └─► evaluate.py (Claude / Codex / Gemini で採点)
+                    └─► evaluate.py（Claude / Codex / Gemini で採点）
 ```
 
-収集済みデータ: **421件のSwift/MIDIコードレビュー**（M2DX + MIDI2Kitの実際のコミット）
-
-採点は3評価者（Claude / Codex / Gemini）の平均スコア（0〜10点）を使用。
+収集済みデータは **421 件の Swift/MIDI コードレビュー**（M2DX + MIDI2Kit の実コミット）。
 
 ---
 
-## ベクトルDBのセットアップ
+## ベクトル DB のセットアップ
 
 ### TiDB Serverless
 
-TiDB v8.5.3 からネイティブの `VECTOR` 型と HNSW インデックスが使える。
+TiDB v8.5.3 からネイティブの `VECTOR` 型と HNSW（= Hierarchical Navigable Small World、近傍探索用のグラフ構造インデックス、Chroma や Pinecone でも使われてる）インデックスが入った。MySQL プロトコル互換なので、接続は `pymysql` + SSL でいける。
 
 ```sql
 CREATE TABLE reviews (
@@ -65,11 +72,7 @@ CREATE TABLE reviews (
 );
 ```
 
-接続は `pymysql` + SSL:
-
 ```python
-import pymysql
-
 conn = pymysql.connect(
     host="gateway01.ap-northeast-1.prod.aws.tidbcloud.com",
     port=4000,
@@ -80,11 +83,25 @@ conn = pymysql.connect(
 )
 ```
 
-**ハマりポイント**: HNSW インデックスは `WHERE flagged = 0` のような事前フィルタと非互換（TiDB Serverless v8.5.3時点）。上位N件を多めに取得してPython側でフィルタする方式に変更した。
+これで 421 件の embedding 移行はだいたい 10 分で終わった。
+
+**が、すぐ詰まった。**
+
+最初はこう書いた:
+
+```sql
+SELECT ... FROM reviews
+WHERE flagged = 0
+  AND diff_embedding IS NOT NULL
+ORDER BY VEC_COSINE_DISTANCE(diff_embedding, %s) ASC
+LIMIT %s
+```
+
+実行するとエラー。TiDB Serverless v8.5.3 時点で、**HNSW インデックスは `WHERE` フィルタと一緒に使えない**らしい。ANN 検索（= Approximate Nearest Neighbor、完全一致ではなく「だいたい近い」を高速に探す方法）とメタデータフィルタの同時適用は未サポート。
+
+回避策: フィルタなしで `top_k × 5` 件多めに取ってきて、Python 側で絞る。
 
 ```python
-# WHERE フィルタをHNSW検索に混ぜるとエラー
-# → top_k * 5 件取得してPythonでフィルタ
 sql = """
     SELECT commit_hash, code_diff, synthesized_review, flagged,
            VEC_COSINE_DISTANCE(diff_embedding, %s) AS dist
@@ -96,6 +113,8 @@ sql = """
 cur.execute(sql, (vec_str, top_k * 5))
 rows = [r for r in cur.fetchall() if r["synthesized_review"] and not r["flagged"]][:top_k]
 ```
+
+*WHERE フィルタが使えないなら多めに取ってから捨てればいい。* ちょっと行儀悪いが、421 件規模なら実用上の問題はない。
 
 ### ChromaDB（ローカル）
 
@@ -109,7 +128,7 @@ collection = client.get_or_create_collection(
 )
 ```
 
-追加・検索ともに同期APIで、セットアップが最もシンプル。
+以上。セットアップはこれだけ。`pip install chromadb` して 3 行で終わる。WHERE フィルタの制限もなく、メタデータフィルタと ANN を同時に使える。
 
 ### Pinecone Serverless
 
@@ -126,13 +145,17 @@ pc.create_index(
 index = pc.Index("m2lora-reviews")
 ```
 
+Pinecone はリージョンが `us-east-1` 固定（Starter プランの制約）で、東京からのレイテンシは体感で一番大きい。あと **Pinecone は類似度スコア（1 = 完全一致）を返す**ので、距離に変換するときに `1 - score` が必要。これを忘れると「遠いほど良い」が逆転する。
+
 ---
 
-## embeddingとRAG注入
+## embedding まわりのハマり
 
-### bge-large でdiffをembed
+### bge-large のトークン制限
 
-bge-large は512トークンの制限があり、コードdiffはトークン密度が高い。文字数で切り詰める際は1200文字を上限にし、エラー時は800→500→300と段階的に短縮した。
+bge-large（= 中国語・コード対応の BERT 系 embedding モデル、1024 次元）は 512 トークンの入力制限がある。コード diff はトークン密度が高くて、普通に投げると `the input length exceeds the context length` エラーが返ってくる。
+
+最初は文字数 2000 で切っていたが、日本語コメントが多い diff だと 2000 文字でも超過した。結局、**段階的に縮めて成功するまで retry** する方式に落ち着いた。
 
 ```python
 async def embed(text: str) -> list[float]:
@@ -147,14 +170,16 @@ async def embed(text: str) -> list[float]:
         if "embeddings" in data:
             return data["embeddings"][0]
         if data.get("error", "").startswith("the input length"):
-            continue
+            continue  # 短くして再試行
         raise ValueError(f"unexpected: {list(data.keys())}")
     raise ValueError("embed failed at all truncation levels")
 ```
 
-### プロンプトへの注入
+1200 → 800 → 500 → 300 文字と縮めていって、300 文字でも失敗したら諦める。実際には 1200 文字でほぼ通る。
 
-類似diff上位2件の `synthesized_review`（Claude合成済みの高品質レビュー）をプロンプトに差し込む。
+### RAG の注入方法
+
+類似 diff 上位 2 件の `synthesized_review`（= Claude が 3 者評価を統合して作った高品質レビュー）を、プロンプトの頭に差し込む。
 
 ```python
 _RAG_SECTION = """\
@@ -186,11 +211,13 @@ async def review_diff(diff: str, use_rag: bool = True) -> str:
     return await _generate(prompt)
 ```
 
+「参考」と書いてあるので、LLM はそのまま丸コピーはしない（はず）。実際に見ると、似た観点を自分の言葉でアレンジして書いていることが多かった。
+
 ---
 
-## 実測比較（20件）
+## 実測比較（20 件）
 
-M2DX・MIDI2Kit の実コミット20件でランダムサンプリング。各commitに4条件のレビューを生成し、Claude / Codex / Geminiの平均スコアで評価。
+M2DX・MIDI2Kit の実コミット 20 件をランダムサンプリング。各 commit に 4 条件（RAGなし / TiDB / Chroma / Pinecone）のレビューを生成し、Claude / Codex / Gemini の平均スコアで評価。
 
 ### 全件スコア
 
@@ -217,7 +244,7 @@ M2DX・MIDI2Kit の実コミット20件でランダムサンプリング。各co
 | 7e8f8e49 | M2DX | 3.00 | 4.00 | 3.00 | **4.00** |
 | 1e8cddfd | M2DX | 5.00 | 5.00 | 5.00 | 5.00 |
 
-### 集計結果
+### 集計
 
 | | RAGなし | TiDB | Chroma | Pinecone |
 |---|---|---|---|---|
@@ -227,38 +254,44 @@ M2DX・MIDI2Kit の実コミット20件でランダムサンプリング。各co
 
 ---
 
-## 考察
+## 何が起きているか
 
-### RAG注入は効く。ただし万能ではない
+### RAG は効く。ただし全件ではない
 
-20件中15〜13件で改善した（60〜75%）。平均で+1〜+1.6点の改善は、採点スケール的に「凡庸 → まあまあ」程度の変化だが、幻覚を含む指摘が類似事例の参照によって抑制されることが主因と思われる。
+20 件中 60〜75% で改善した。**平均 +1〜+1.6 点**は「凡庸なレビュー → まあまあなレビュー」程度の変化だが、幻覚を含む指摘（存在しない API の言及、誤ったオーバーフロー警告など）が類似事例の参照によって抑制されているケースが体感で多かった。
 
-改善しなかった5〜7件を見ると、**RAGなしのスコアが既に7点以上**のケースが多い。天井効果の可能性が高く、高品質なdiffに対してはRAGコンテキストがノイズになることもある。
+改善しなかった 5〜7 件を見ると、**RAGなしのスコアが既に 7 点以上**のパターンが大半。天井効果で、元から良いレビューに RAG コンテキストを追加しても上積みにならず、むしろノイズになることがある。
+
+### `9fd81f6` の逆転現象
+
+1 件だけ顕著な例を挙げると、`9fd81f6`（M2DX, NaN ガード追加）はノーRAGで **7.33** だったが、TiDB RAG では **3.67** まで落ちた。
+
+このケースでは「Swift の `isNaN` チェックはオーバーヘッドがある」という類似レビューが注入されていたが、diff の文脈では全く無関係だった。**類似ベクトルが近くても、注入された情報が的外れになることがある**。RAG は常に「文脈を豊かにする」わけではない、という当たり前の話。
 
 ### TiDB vs Chroma vs Pinecone
 
 | 観点 | TiDB | Chroma | Pinecone |
 |---|---|---|---|
-| 平均改善 | +1.03 | +1.50 | +1.60 |
-| 改善率 | 65% | 60% | 75% |
+| 平均Δ | +1.03 | +1.50 | **+1.60** |
+| 改善率 | 65% | 60% | **75%** |
 | セットアップ | クラウド（要SSL） | ローカル（最簡単） | クラウド |
-| 無料枠 | Serverless（5GiB） | 制限なし（ローカル） | Starter（2GiB） |
-| HNSW WHERE制限 | あり（要回避） | なし | なし |
-| レイテンシ | 中（AWS Tokyo） | 最小（ローカル） | 大（AWS us-east-1） |
+| 無料枠 | Serverless 5GiB | 制限なし（ローカル） | Starter 2GiB |
+| HNSW WHERE 制限 | **あり（要回避）** | なし | なし |
+| レイテンシ | 中（AWS Tokyo） | **最小（ローカル）** | 大（us-east-1） |
 
-今回の条件（421件、1024次元）ではPineconeが最も安定して高スコアを出した。ただしサンプル数が少ないため、差は誤差の範囲とも言える。
+今回の 421 件・1024 次元という条件では Pinecone が一番スコアを出した。ただし **サンプル 20 件なので差は誤差の範囲**かもしれない。DB の選択よりも「どんなレビューを入れるか」の方が影響が大きそう。
 
-**実用上の選択指針**:
-- **プロトタイプ・ローカル開発** → Chroma（ゼロ設定、pip install だけ）
-- **チーム共有・スケールアウト** → TiDB or Pinecone（マネージドで永続化不要）
-- **既存MySQLアプリへの組み込み** → TiDB（MySQLプロトコル互換、SQL で JOIN 可能）
+スコアより実感として差があったのは**セットアップのしやすさ**。Chroma は `pip install chromadb` だけで動く。TiDB と Pinecone はクレデンシャル管理・SSL・API キーが必要で、最初に動くまでが数十分かかる。
 
-### TiDBを選ぶ理由：SQLとベクトルの統合
+### TiDB を使う理由：SQL とベクトルの統合
 
-TiDBの最大の強みは、ベクトル検索と通常のSQLを同一クエリで書けることだ。たとえば「スコアが高く、かつ類似しているレビュー」の絞り込みが1クエリで書ける（ただし前述のHNSWフィルタ制限は要考慮）。
+スコアで TiDB が 3 番手だったとはいえ、このパイプラインとの相性が一番良いと思っている理由がある。
+
+ベクトル検索と通常の SQL を**同一クエリで書ける**。
+
+たとえば「スコアが高くて、かつ類似した diff を取ってきたい」は 1 クエリで書ける:
 
 ```sql
--- 高スコアかつ類似のレビューを取得
 SELECT id, synthesized_review,
        VEC_COSINE_DISTANCE(diff_embedding, %s) AS dist
 FROM reviews
@@ -267,7 +300,23 @@ ORDER BY dist ASC
 LIMIT 5;
 ```
 
-ChromaやPineconeではメタデータフィルタとANN検索の組み合わせに制約があるが、TiDBはSQLの表現力をそのまま使える。これはLoRAのデータ品質管理（世代別スコア集計、フラグ管理など）との相性が良い。
+Chroma や Pinecone ではメタデータフィルタと ANN 検索の組み合わせに制限があるが、TiDB は SQL の表現力をそのまま持ち込める。`review_model` 別の集計、`flagged` フィルタ、プロジェクト別スコア比較——全部 SQL で書ける。LoRA データ品質管理との相性がいい。
+
+:::message
+ただし前述の通り、現時点（v8.5.3）では HNSW と `WHERE` を組み合わせると動かない。将来のバージョンで解消される可能性はある。
+:::
+
+---
+
+## 選択指針
+
+正直なところ、どれを選んでもスコア差は誤差に近い。決め手はユースケース:
+
+- **プロトタイプ・ローカル開発** → **Chroma**（pip install だけ、制限なし）
+- **チーム共有・スケールアウト** → **TiDB or Pinecone**（マネージドで永続化不要）
+- **既存アプリに SQL と一緒に組み込む** → **TiDB**（MySQL プロトコル互換、JOIN / 集計が使える）
+
+自分のケースでは「LoRA データ管理の SQL とベクトル検索を統合したい」という理由で TiDB をメインに使い続けることにした。Chroma はローカル開発の高速プロトタイプ用として併用。
 
 ---
 
@@ -275,13 +324,30 @@ ChromaやPineconeではメタデータフィルタとANN検索の組み合わせ
 
 | やったこと | 結果 |
 |---|---|
-| 421件のSwiftコードレビューをTiDB/Chroma/Pineconeに移行 | bge-largeで1024次元embed、10分以内に完了 |
-| RAGなし vs 3DB の20件比較 | 全DB平均+1〜+1.6点の改善 |
-| Pineconeが最も安定 | 改善率75%、平均+1.60点 |
-| TiDBはSQLとの統合が強み | ベクトル+スコアフィルタを同一クエリで実現 |
+| 421 件のレビューを TiDB / Chroma / Pinecone に移行 | bge-large 1024 次元 embed、10 分以内 |
+| 4条件 × 20 commit で比較 | 全 DB で RAGなし比 +1.0〜+1.6 点 |
+| Pinecone が数字は最良 | 改善率 75%、平均 +1.60 |
+| TiDB は SQL 統合が強み | スコアより「管理のしやすさ」に価値 |
+| HNSW + WHERE は未サポート（v8.5.3） | top_k × 5 件取得 → Python フィルタで回避 |
 
-ローカルLLMのRAG強化としては、**まずChromaで試して、スケール・共有が必要になったらTiDB/Pineconeに移行**という流れが現実的だと感じた。
+「まず Chroma で試して、スケールが必要になったら TiDB / Pinecone へ」が現実的な移行パス。自分のプロジェクトみたいに SQLite の管理 DB が既にある場合は、最初から TiDB を選んで SQL と一緒に使う方が長期的に楽だと感じた。
 
 ---
 
+:::message
+**シリーズの他の記事**
+
+- [（１）監査編 — 指摘 52 件、真陽性 0 件](https://zenn.dev/hakaru/articles/m2dx-local-llm-audit-zero-true-positives)
+- [（２）RAG 編 — Swift 仕様書で誤検出 76% 削減](https://zenn.dev/hakaru/articles/m2dx-local-llm-audit-rag)
+- [（３）aider 編 — 参照軸は改善、知識軸は依然ダメ](https://zenn.dev/hakaru/articles/m2dx-local-llm-agentic-harness-eval)
+- [（４）LoRA 編 — 誤検知 93% 削減](https://zenn.dev/hakaru/articles/swift-audit-lora-fp-reduction)
+- [（５）M2LoRA パイプライン編 — 開発しながら自動でデータが貯まる仕組み](https://zenn.dev/hakaru/articles/m2lora-code-review-pipeline)
+:::
+
 *本記事は [Zennfes Spring 2026 × TiDB](https://zenn.dev/contests/zennfes-spring-2026-tidb) への応募作品です。*
+
+---
+
+- **M2LoRA**: https://github.com/hakaru/M2LoRA
+- **M2DX-Core (OSS)**: https://github.com/hakaru/M2DX-Core
+- **M2DX (TestFlight)**: https://testflight.apple.com/join/BAtGszPw

@@ -1,14 +1,14 @@
 ---
-title: "ローカルLLMって本当に開発に使える？（番外編）TiDB/Chroma/Pineconeで過去レビューをRAG注入したら幻覚が減った"
+title: "ローカルLLMって本当に開発に使える？（番外編）ベクトルDB比較、TiDB/Chroma/Pinecone"
 emoji: "🗄️"
 type: "tech"
 topics: ["tidb", "rag", "llm", "vectordatabase", "swift"]
 published: false
 ---
 
-ピアノを弾きながら iOS/macOS アプリを個人開発している。最近リリースしたのが 2 本。
+iOS/macOS アプリを個人開発している。最近リリースしたのが 2 本。
 
-**1Take** — 練習録音用 iOS アプリ。録音ボタン1つで LA-2A / 1176 系のリアルタイムコンプレッサーが乗って、DAW なしで「録りながら良い音」になる。自分がピアノの練習録音で欲しかったものをそのまま作った。
+**1Take** — 練習録音用 iOS アプリ。録音ボタン1つで LA-2A / 1176 系のリアルタイムコンプレッサーが乗って、DAW なしで「録りながら良い音」になる。
 
 https://apps.apple.com/us/app/1take/id6757945099
 
@@ -26,7 +26,7 @@ https://testflight.apple.com/join/BAtGszPw
 - **M2DX** — iOS/macOS 向け MIDI 2.0 対応 DX7 互換 FM シンセサイザーアプリ。[TestFlight 公開ベータ](https://testflight.apple.com/join/BAtGszPw) で試せる
 - **M2DX-Core** — M2DX の DX7 互換エンジン部分。Pure Swift、Apache 2.0 で OSS 公開
 - **MIDI2Kit** — M2DX-Core が依存する Swift 製 MIDI 2.0 ライブラリ
-- **M2LoRA** — 上記リポジトリのコミットを自動レビュー・採点・合成し、LoRA 学習データを貯めるパイプライン
+- **M2LoRA** — 上記リポジトリのコミットを自動レビュー・採点・合成し、LoRA 学習データを貯めるパイプライン（private）
 :::
 
 ## 前回までのあらすじ
@@ -405,6 +405,5 @@ HNSW + WHERE の制限は v8.5.3 時点の話。将来のバージョンで解�
 
 ---
 
-- **M2LoRA**: https://github.com/hakaru/M2LoRA
 - **M2DX-Core (OSS)**: https://github.com/hakaru/M2DX-Core
 - **M2DX (TestFlight)**: https://testflight.apple.com/join/BAtGszPw

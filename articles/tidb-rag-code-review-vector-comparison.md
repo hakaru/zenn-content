@@ -123,20 +123,7 @@ TiDB は　HNSW（インデックス階層型ナビゲート可能スモール�
 はWHEREとかORDERとか使えない？？？
 ANN 検索（= Approximate Nearest Neighbor、近似的に近い順を高速取得する方式）とメタデータフィルタの同時使用はできない模様。
 
-回避策: フィルタなしで `top_k × 5` 件を多めに取ってきて、Python 側で絞る。
-
-```python
-sql = """
-    SELECT commit_hash, code_diff, synthesized_review, flagged,
-           VEC_COSINE_DISTANCE(diff_embedding, %s) AS dist
-    FROM reviews
-    WHERE diff_embedding IS NOT NULL
-    ORDER BY dist ASC
-    LIMIT %s
-"""
-cur.execute(sql, (vec_str, top_k * 5))
-rows = [r for r in cur.fetchall() if r["synthesized_review"] and not r["flagged"]][:top_k]
-```
+回避策: フィルタなしで `top_k × 5` 件を多めに取ってきて、加工！
 
 ### ChromaDB（ローカル）
 

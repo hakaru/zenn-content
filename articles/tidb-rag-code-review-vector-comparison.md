@@ -177,8 +177,28 @@ Starter プランはリージョンが `us-east-1` 固定で、東京から遠�
 
 ### bge-large の 512 トークン制限
 
-bge-large（= 中国語・コード対応の embedding モデル、1024 次元、採用理由はOllamaで簡単にローカル動作するからぐらい。）
-には 512 トークンの入力制限がある。コード diff はトークン密度が高くて普通に投げると `the input length exceeds the context length` エラーが返ってくる。
+bge-largeには 512 トークンの入力制限がある。コード diff はトークン密度が高くて普通に投げると `the input length exceeds the context length` エラーが返ってくる。
+
+:::message
+**なぜ。bge-large**
+
+= 中国語・コード対応の embedding モデル、1024 次元、採用理由はOllamaで簡単にローカル動作するからぐらい。
+
+1. Ollamaでローカル動作 — パイプライン全体をローカル完結にしたかった。bge-large:latest は ollama pull 一発で使える
+
+2. 1024次元 — よく使われる高品質サイズ。TiDBの VECTOR(1024) もこれに合わせて決めた（鶏卵）
+
+3. MTEB ベンチマークで高性能 — 当時の "Ollamaで手軽に使える中で精度が高い" 定番候補
+
+  ただし コード特化モデルではない。一般テキスト向け。
+代替候補として nomic-embed-text（768次元、速い）や
+  mxbai-embed-large（同1024次元）もOllama対応。コードの意味理解に特化させるなら codebert-base
+  系も選択肢だが、Ollamaで直接使えるかは要確認。
+
+  実際の使い方（diff同士の類似検索）を考えると、コード構文より「この変更が何をしようとしているか」の意味的類似性で十分機能する
+  ので、bge-largeで問題は出ていない、という感じかと思います。
+
+:::
 
 最初は文字数 2000 で切っていたが、日本語コメントが多い diff はそれでも超過した。**段階的に縮めながら retry** する方式に落ち着いた。
 

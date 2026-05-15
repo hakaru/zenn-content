@@ -239,10 +239,11 @@ scripts/review.sh --title my-change --base main
 
 ## 現在の状態（Phase 6）
 
-- **テスト**: 70 tests / 0 failures（CoreTests / IntegrationTests / AudioRegressionTests / DDSPStatefulTests）
+- **テスト**: 77 tests / 0 failures（CoreTests / IntegrationTests / AudioRegressionTests / DDSPStatefulTests）
 - **CPU**: 16音ポリフォニー @ 44.1kHz で実時間の1/4未満
 - **FX**: Tremolo（bi-phaseステレオ、RhodesSuitcaseスタイル）/ Chorus / Phaser / NeveFX
 - **実機**: macOS + iPhone 14 Pro Max + iPhone 15 Pro Max にインストール済み
+- **監査修正済み**: セキュリティ監査 3 High / コードレビュー 4 Critical をサブエージェント駆動開発で全対応
 - **残**: β評価（5〜10人）→ RC評価（20人）→ Phase 7（codesign / App Store提出）
 
 DDSPの実weightを使った広帯域ゲイン補正は現在stubで、物理モデル単体で動作しています。物理モデル（C++17 Karplus-Strong + ハンマー + ピックアップ + ダンパー）は完成していて、これ単体でも演奏できます。DDSPは「補正のおまけ」であって、なければ音が出ないわけではありません。

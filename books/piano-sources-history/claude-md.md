@@ -1,3 +1,7 @@
+---
+title: "CLAUDE.md — Claude Code に渡したリポジトリガイド"
+---
+
 # 08. CLAUDE.md — Claude Code に渡したリポジトリガイド
 
 このシリーズは Claude Code を使いながら開発してきた。各プロジェクトには `CLAUDE.md`（Claude Code がリポジトリを開いたとき最初に読む設定ファイル）を置いてきたが、本 Zenn book リポジトリ自体にも `CLAUDE.md` を作成した。

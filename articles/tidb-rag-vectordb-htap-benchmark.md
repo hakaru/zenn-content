@@ -1,5 +1,5 @@
 ---
-title: "コミット 421 件が LoRA 学習データになるまで — 個人開発の AI データ基盤を TiDB / ChromaDB / Pinecone で実測した話"
+title: "コミット 421 件が LoRA 学習データになるまで — TiDB/ChromaDB/Pinecone で実測した AI データ基盤"
 emoji: "📊"
 type: "tech"
 topics: ["tidb", "rag", "llm", "vectordatabase", "swift"]

@@ -20,50 +20,43 @@ https://testflight.apple.com/join/BAtGszPw
 
 ---
 
-ローカルLLMにコードレビューをさせると、**幻覚（Hallucination）** が混入することがある。「`@Bindable`はSwift 5.9で非推奨」「このキャストはオーバーフローの危険がある」——どちらも間違いだ。指摘が具体的に見えるほど、間違いに気づきにくい。
+M2DX の開発中に「ローカル LLM でコードレビューを自動化できないか」を試し始めたのがシリーズの始まり。
 
-この問題を緩和するために試みたのが **RAG**（Retrieval-Augmented Generation）だ。
+（１）では llama 系を中心に 10 機種試して、指摘 52 件・真陽性 0 件という結果だった。
+（２）では Swift 仕様書を RAG に入れて誤検出を 76% 減らした。
+（５）では git push のたびにレビュー・採点・合成が自動で走るパイプラインを作り、**421 件**のレビューが溜まった。
 
-> **RAG（検索拡張生成）とは**
-> LLMに回答を生成させる前に、関連する情報を外部DBから検索してプロンプトに注入する手法。LLMが「知らないはずの情報」を参照できるようになり、幻覚が減りやすい。
+で、今回。
 
-本記事では、Swiftコードレビューの自動収集・評価システム **M2LoRA** を題材に、次の3点を実測で比較する。
+（２）の RAG（= 外部 DB から関連情報を引いてプロンプトに注入する手法）は「Swift の言語仕様」を注入した。でも 421 件のほうは「実際のコードに対してどんなレビューをすべきか」のパターン集だ。仕様書とは別物で、「こういう diff が来たらこういう観点で見る」という具体事例になっている。
 
-1. **ベクトルDB 3択の検索品質**（TiDB / ChromaDB / Pinecone）
-2. **ベクトルDB 3択の性能**（Ingest スループット・検索レイテンシ）
-3. **HTAPの実証**（書き込み負荷下でのOLAPクエリ劣化を計測）
+これを RAG に入れたらどうなるか。ついでに **TiDB Serverless / ChromaDB / Pinecone Serverless の 3 択**で同じデータを入れて性能差も測ってみた。
 
 ---
 
-## システム構成
-
-### M2LoRA パイプライン
+## パイプライン構成
 
 ```
 git diff
   └─► review.py (llama3.3:70b-m2lora-v1, Ollama)
         └─► retriever.py
-              ├─ bge-large:latest でdiffをembed (1024次元)
-              ├─ TiDB / Chroma / Pinecone で類似diff上位2件を取得
+              ├─ bge-large:latest で diff をベクトル化（1024次元）
+              ├─ TiDB / Chroma / Pinecone で類似 diff 上位 2 件を取得
               └─ 類似レビュー例をプロンプトに注入
                     └─► evaluate.py (Claude / Codex / Gemini で採点)
 ```
 
-収集済みデータ: **421件のSwift/MIDIコードレビュー**（M2DX + MIDI2Kitの実際のコミット）
+収集済みデータ: **421件のSwift/MIDIコードレビュー**（M2DX + MIDI2Kitの実コミット）
 
-> **Embedding（埋め込み）とは**
-> テキストを固定長の数値ベクトルに変換する処理。意味的に似たテキストは近いベクトルになる。ここでは `bge-large:latest`（1024次元）をOllamaでローカル実行。
+embedding モデルは bge-large:latest（1024次元）をOllama でローカル実行。コード特化じゃないけど「この変更が何をしようとしているか」の意味的な類似度で引いてくるには十分だった。
 
 ---
 
-## ベクトルDBのセットアップ
+## ベクトルDB 3択のセットアップ
 
 ### TiDB Serverless
 
-TiDB v8.5.3 からネイティブの `VECTOR` 型と **HNSWインデックス** が使える。
-
-> **HNSW（Hierarchical Navigable Small World）とは**
-> 高次元ベクトルの近傍探索アルゴリズム。グラフ構造を階層的に構築し、O(log n) に近い速度で類似ベクトルを探せる。ほとんどのベクトルDBが採用している。
+TiDB v8.5.3 からネイティブの `VECTOR(1024)` 型と HNSW インデックス（= グラフ構造で近傍を高速探索するアルゴリズム。ほぼ全ベクトルDBが採用してる。らしい）が使えるようになった。MySQL プロトコル互換なので `pymysql` + SSL で繋がる。
 
 ```sql
 CREATE TABLE reviews (
@@ -82,32 +75,20 @@ CREATE TABLE reviews (
 );
 ```
 
-接続は `pymysql` + SSL（TiDB ServerlessはMySQLプロトコル互換）:
+早速 TiDB の癖にハマった。
 
-```python
-import pymysql
-
-conn = pymysql.connect(
-    host="gateway01.ap-northeast-1.prod.aws.tidbcloud.com",
-    port=4000,
-    user="<user>",
-    password="<password>",
-    database="m2lora",
-    ssl={"ca": "/etc/ssl/cert.pem"},
-)
+```sql
+SELECT ... FROM reviews
+WHERE flagged = 0
+ORDER BY VEC_COSINE_DISTANCE(diff_embedding, %s) ASC
+LIMIT 10
 ```
 
-**ハマりポイント**: HNSWインデックスは `WHERE flagged = 0` のような事前フィルタと非互換（v8.5.3時点）。上位 `top_k * 5` 件を取得してPython側でフィルタする方式に変更した。
+これがエラーになる。HNSW インデックスと WHERE フィルタが同時に使えない（v8.5.3 時点）。ANN 検索（= 厳密な全探索をやめて高速に近傍を近似取得する方式）とメタデータフィルタの同時使用が未サポートらしい。。。
+
+回避策: フィルタなしで多めに取ってきて Python 側でフィルタ。
 
 ```python
-sql = """
-    SELECT commit_hash, code_diff, synthesized_review, flagged,
-           VEC_COSINE_DISTANCE(diff_embedding, %s) AS dist
-    FROM reviews
-    WHERE diff_embedding IS NOT NULL
-    ORDER BY dist ASC
-    LIMIT %s
-"""
 cur.execute(sql, (vec_str, top_k * 5))
 rows = [r for r in cur.fetchall() if not r["flagged"]][:top_k]
 ```
@@ -124,13 +105,11 @@ collection = client.get_or_create_collection(
 )
 ```
 
-セットアップが最もシンプル。`pip install chromadb` だけ動く。ただしローカルストレージなので複数マシン間での共有は別途対応が必要。
+以上。`pip install chromadb` して 3 行。WHERE フィルタと ANN の同時使用も問題なし。セットアップコストほぼゼロ。ローカルで簡単。一番楽。ただしローカルファイルなのでマシンをまたぐには別途対応が必要。
 
 ### Pinecone Serverless
 
 ```python
-from pinecone import Pinecone, ServerlessSpec
-
 pc = Pinecone(api_key=os.environ["PINECONE_API_KEY"])
 pc.create_index(
     name="m2lora-reviews",
@@ -140,15 +119,15 @@ pc.create_index(
 )
 ```
 
-マネージドクラウドサービス。APIキー1本で使えるが、検索クエリがus-east-1経由になるため日本からのレイテンシは大きい。
+Starter プランはリージョンが `us-east-1` 固定。東京から遠いのが気になる。
 
 ---
 
-## Embedding とRAG注入
+## embedding のハマり
 
-### diff を embed してベクトル化
+bge-large は 512 トークンの入力制限がある。コードの diff はトークン密度が高くて普通に投げると `the input length exceeds the context length` が返ってくる。
 
-`bge-large` は512トークン制限があり、コードdiffはトークン密度が高い。文字数で段階的に切り詰めるフォールバックを実装した。
+文字数で段階的に切り詰めながら retry する方式に落ち着いた。1200 → 800 → 500 → 300 文字と縮めていって成功したら返す。実際には 1200 文字でほぼ通る。
 
 ```python
 async def embed(text: str) -> list[float]:
@@ -167,49 +146,30 @@ async def embed(text: str) -> list[float]:
     raise ValueError("embed failed at all truncation levels")
 ```
 
-計測したところ、**初回ウォームアップ後は約35〜45ms/回**で安定した（Apple M2 MacBook Pro）。
+ウォームアップ後は 35〜45ms/回 で安定した（Apple M2 MacBook Pro）。
 
-### プロンプトへの注入
+### RAG 注入
 
-類似diff上位2件の `synthesized_review`（Claude合成済みの高品質レビュー）をプロンプトに差し込む。
+類似 diff 上位 2 件の `synthesized_review`（= Claude / Codex / Gemini の 3 者評価を Claude が統合した合成レビュー）をプロンプトの頭に差し込む。
 
 ```python
-async def review_diff(diff: str) -> str:
-    similar = await find_similar(diff, top_k=2)
-    rag_context = ""
-    if similar:
-        examples = "\n".join(
-            f"--- 例{i+1} ---\n{r.synthesized_review[:400]}"
-            for i, r in enumerate(similar)
-        )
-        rag_context = f"=== 類似コードの過去レビュー例 ===\n{examples}\n=== END ===\n\n"
-
-    prompt = f"""\
-あなたはSwift/MIDIコードレビューの専門家です。
-{rag_context}
-=== コードdiff ===
-{diff[:500]}
-=== END ===
-
-レビュー:"""
-    return await _generate(prompt)
+rag_context = f"=== 類似コードの過去レビュー例 ===\n{examples}\n=== END ===\n\n"
+prompt = f"あなたはSwift/MIDIコードレビューの専門家です。\n{rag_context}..."
 ```
 
 ---
 
-## ベンチマーク①: ベクトルDB性能比較
+## ベンチマーク① — DB 単体の性能を測る
 
-### 計測方法
+ちゃんと比較したかったので、embedding（Ollama bge-large）は事前にキャッシュして DB の処理だけを計測する設計にした。
 
-- データ: SQLiteから `avg_score ≥ 4.0` の高品質レビュー94件を使用
-- **Ingest**: 70件を各DBにupsert、スループット（件/秒）を計測
-- **Search**: 20件のdiffで類似検索、レイテンシの分布を計測
-- embed（Ollama bge-large）は事前にキャッシュし、**DB単体の性能を分離**して計測
+...と思ったら Phase 0 のキャッシュ計算が `_original_embed` を直接呼んでいてキャッシュに書き込まれていなかった。「embed cache 保存: 0 件」になってて焦った。。。`_cached_embed` 経由に直したら正常に動作。こういうバグに気づかないまま計測してたら嫌だった。
 
-> **p50/p95/p99（パーセンタイル）とは**
-> 100件の計測値を小さい順に並べたとき、50番目がp50（中央値）、95番目がp95、99番目がp99。平均値と違い外れ値の影響を受けにくく、レイテンシ計測の標準指標。
+データは SQLite から `avg_score ≥ 4.0` の高品質レビュー 94 件を抽出。70 件を ingest、20 件で検索性能を計測。
 
-### Ingest スループット
+p50/p95/p99 はレイテンシの分布指標（小さい順に並べたとき 50番目/95番目/99番目の値）。平均値より外れ値の影響を受けにくいのでレイテンシ計測でよく使われる。
+
+### Ingest スループット（70件）
 
 | DB | 総時間 | スループット |
 |---|---|---|
@@ -217,9 +177,9 @@ async def review_diff(diff: str) -> str:
 | TiDB Serverless | 79.4 秒 | 0.9 件/秒 |
 | Pinecone Serverless | 111.8 秒 | 0.6 件/秒 |
 
-ChromaDB がローカルのため圧倒的に速い。クラウド同士ではTiDBがPineconeの**1.5倍のスループット**。
+ローカル vs クラウドの差がそのまま出た。クラウド同士だと TiDB が Pinecone の 1.5 倍速い。
 
-### 検索レイテンシ（embed時間を除くDB単体）
+### 検索レイテンシ（20クエリ、embedding時間を除くDB単体）
 
 | DB | p50 | p95 | p99 |
 |---|---|---|---|
@@ -227,70 +187,61 @@ ChromaDB がローカルのため圧倒的に速い。クラウド同士ではTi
 | TiDB Serverless | 1,157 ms | 1,260 ms | 1,264 ms |
 | Pinecone Serverless | 1,623 ms | 2,025 ms | 2,027 ms |
 
-ChromaDBのp95が396msと高分散なのはローカルHNSWのJIT的な初期化によるもの（2回目以降は低レイテンシに安定）。クラウド同士ではTiDBがPineconeより**約30%速い**。
+ChromaDB の p95 が 396ms と高いのは、ローカル HNSW の初回インデックス展開が走るから。2回目以降は低レイテンシに安定する。
 
-> **コサイン距離とは**
-> 2つのベクトルの向きの差を0〜2の値で表す指標（0=完全一致、2=逆向き）。ベクトルの大きさを無視して「意味の近さ」を比較できるため、テキスト検索で広く使われる。
+クラウド同士だと TiDB が Pinecone より約 30% 速かった。us-east-1 固定の影響が数字に出てる。
 
-### Top-K一致率（TiDB基準）
+### Top-K 一致率（TiDB 基準）
 
-3DBが返す上位5件の重複度を比較した。
+3 DB が返す上位 5 件のどれだけが一致するか（コサイン距離 = ベクトルの向きの差を 0〜2 で表す指標で近い順に取ってくる）。
 
 | 比較対象 | TiDBとの一致率 |
 |---|---|
 | ChromaDB | **99%** |
 | Pinecone | **98%** |
 
-**3DBの検索品質はほぼ同等。** 同じHNSW+コサイン距離を使っている限り、DBが違っても返す結果はほぼ一致する。どのDBを選んでも検索品質の差で悩む必要はない。
+どの DB を選んでも検索品質はほぼ変わらない。同じ HNSW + コサイン距離で実装されてるんだからそりゃそうか。。という結果だった。
 
 ---
 
-## ベンチマーク②: HTAP — TiDBが「1本で済む」理由
+## ベンチマーク② — HTAP。TiDB が「1本で済む」ことを測る
 
-### HTAP とは
+これが今回一番面白かった実験。
 
-> **HTAP（Hybrid Transactional/Analytical Processing）とは**
-> 同一DBでトランザクション処理（OLTP: INSERT/UPDATE）と分析処理（OLAP: AVG/GROUP BY）を同時にこなすアーキテクチャ。TiDBはOLTP用の行ストア（TiKV）とOLAP用の列ストア（TiFlash）を内部で持ち、2種類のワークロードを分離して処理する。
+### 2システム問題
 
-### ChromaDB + SQLite「2システム問題」
-
-ChromaDBはベクトル専用DBのため、`AVG(score) GROUP BY review_model` のような分析クエリは書けない。そのため実運用では**SQLiteとChromaDBを並列に管理する2システム構成**になりがちだ。
+ChromaDB はベクトル専用 DB なので `AVG(score) GROUP BY review_model` みたいな分析クエリが書けない。だから実運用だと SQLite + ChromaDB の 2 システム構成になりがちだ。
 
 ```
-書き込み時:
-  ├─► SQLite  INSERT (スコア・メタデータ管理)
-  └─► ChromaDB upsert (ベクトル検索)
+書き込み:
+  ├─► SQLite  INSERT（スコア・メタデータ管理）
+  └─► ChromaDB upsert（ベクトル検索）
 
-読み取り時:
-  ├─► SQLite  SELECT AVG(score)...  (分析クエリ)
-  └─► ChromaDB query(vec, top_k)   (ベクトル検索)
+読み取り:
+  ├─► SQLite  SELECT AVG(score)...（分析クエリ）
+  └─► ChromaDB query(vec, top_k)（ベクトル検索）
 ```
 
-2システムを同期し続けるのは運用コストだ。書き込みの一方が失敗したときの不整合も起きうる。
+2か所に書いて2か所から読む。同期コストも高いし、片方だけ書き込み失敗したときの不整合も怖い。
 
-### TiDBなら1本で完結
+### TiDB は SQL + ベクトルが 1 クエリで完結する
 
-```python
-# ベクトル検索 + SQLフィルタ + 集計 — 全部同一DBで完結
-sql = """
-    SELECT review_model,
-           AVG((claude_score + codex_score + gemini_score) / 3.0) AS avg_score,
-           COUNT(*) AS cnt,
-           VEC_COSINE_DISTANCE(diff_embedding, %s) AS dist
-    FROM reviews
-    WHERE diff_embedding IS NOT NULL
-    ORDER BY dist ASC
-    LIMIT 5
-"""
+```sql
+SELECT review_model,
+       AVG((claude_score + codex_score + gemini_score) / 3.0) AS avg_score,
+       COUNT(*) AS cnt
+FROM reviews
+WHERE diff_embedding IS NOT NULL
+GROUP BY review_model
 ```
 
-### 計測: 書き込み負荷下でのOLAPレイテンシ
+これと同じ DB にベクトルも入っている。1 システムで完結。
 
-INSERT を秒あたり `N` 件投入しながら、分析クエリ（`AVG(score) GROUP BY review_model`）を3秒ごとに実行してレイテンシを計測した。
+TiDB の HTAP（= トランザクションと分析を同一 DB で同時にこなすアーキテクチャ）は行ストア（TiKV）と列ストア（TiFlash）を内部で分離していて、INSERT と AVG/GROUP BY が互いに干渉しない。。。らしい。本当にそうなのか測ってみた。
 
-> **OLTP / OLAP とは**
-> - **OLTP（オンライントランザクション処理）**: 頻繁な INSERT/UPDATE。バックフィルやリアルタイム書き込みがこれに相当。
-> - **OLAP（オンライン分析処理）**: 大量レコードの集計・分析クエリ（AVG, GROUP BY, COUNT など）。
+### 計測: 書き込みしながら分析クエリを叩く
+
+INSERT を一定レートで投入しながら、分析クエリ（`AVG(score) GROUP BY review_model`）を 3 秒ごとに実行してレイテンシを計測。負荷を 0 → 10 → 30 件/分と変えて影響を見る。
 
 **OLAP クエリ p50 レイテンシ（ms）**
 
@@ -300,28 +251,22 @@ INSERT を秒あたり `N` 件投入しながら、分析クエリ（`AVG(score)
 | 10 件/分 | 14.5 | 5.0 | 1.5 |
 | 30 件/分 | **14.1** | 3.6 | 1.5 |
 
-**TiDBのOLAPレイテンシはINSERT負荷でほぼ変化しない**（15.1 → 14.1ms）。
+TiDB、**全く劣化しない**。30件/分 INSERT しながらでも 14ms で安定している。
 
-これはTiDBのHTAPアーキテクチャが行ストア（TiKV）と列ストア（TiFlash）を分離しているため、書き込みが分析クエリの実行パスに干渉しないためだ。
-
-SQLiteは単純なローカルファイルDBなので生のOLAPは速い（3.5ms）が、10件/分の書き込みで5.0msに増加（ライトロックの競合）し、ChromaDBへの追加接続も必要になる。
-
-### アーキテクチャ比較まとめ
+SQLite は 10件/分 で 5.0ms に増加（ライトロックの競合）。そして ChromaDB への別クエリも必要になる。
 
 ```
-ChromaDB + SQLite:  OLAP 3.5ms ✅  Vector 1.3ms ✅  ただし 2システム管理 ❌
+ChromaDB + SQLite:  OLAP 3.5ms ✅  Vector 1.3ms ✅  2システム管理 ❌
 TiDB Serverless:    OLAP  15ms ✅  Vector 1.2s  ✅  1システムで完結 ✅
 ```
 
-絶対速度ではSQLite+ChromaDBが速いが、**クラウド運用・スケールアウト・HTAP**を求めるならTiDBが合理的な選択になる。
+絶対値では SQLite が速い。でも「書きながら集計する」用途でクラウド運用するなら TiDB の 1 本管理はかなり強い。
 
 ---
 
-## RAG品質比較（実コミット20件）
+## RAG 品質比較（実コミット20件）
 
-M2DX・MIDI2Kit の実コミット20件を3評価者（Claude / Codex / Gemini）の平均スコアで評価した。
-
-### 集計結果
+M2DX・MIDI2Kit の実コミット 20 件に対して RAGなし / TiDB / ChromaDB / Pinecone で生成したレビューを Claude / Codex / Gemini の平均スコアで比較。
 
 | | RAGなし | TiDB | ChromaDB | Pinecone |
 |---|:---:|:---:|:---:|:---:|
@@ -329,15 +274,13 @@ M2DX・MIDI2Kit の実コミット20件を3評価者（Claude / Codex / Gemini�
 | **平均Δ** | — | +1.03 | +1.50 | **+1.60** |
 | **改善件数** | — | 13/20 (65%) | 12/20 (60%) | **15/20 (75%)** |
 
-全3DBでRAG注入が有効（平均+1〜+1.6点）。Pineconeが最も安定したが、**前章のベンチマーク①で3DBの検索品質はほぼ同等（99%一致）と確認済みのため、今回の差は誤差の範囲**と考えられる。
+全 DB で改善した。Pinecone が数字上は最良だけど、Top-K 一致率 98〜99% だから DB の差というより誤差の範囲だと思う。
 
-### RAGが効かなかったケース
-
-改善しなかった5〜7件を見ると、**RAGなしのスコアが既に7点以上**のケースが多かった。類似事例のコンテキストがノイズになる「天井効果」と思われる。
+効かなかった 5〜7 件は RAGなしでも 7 点以上のコミットが多かった。もともと高品質な diff に RAG を足してもコンテキストがノイズになるだけ、という天井効果っぽい。
 
 ---
 
-## 考察: どのDBを選ぶか
+## どの DB を選ぶか
 
 | 観点 | TiDB | ChromaDB | Pinecone |
 |---|---|---|---|
@@ -349,11 +292,9 @@ M2DX・MIDI2Kit の実コミット20件を3評価者（Claude / Codex / Gemini�
 | 無料枠 | Serverless 5GiB | ローカル無制限 | Starter 2GiB |
 | MySQLプロトコル互換 | **✅** | ❌ | ❌ |
 
-**選択指針:**
-
-- **ローカル開発・プロトタイプ** → ChromaDB（`pip install` だけ、設定ゼロ）
-- **クラウド本番・チーム共有** → TiDB（Pineconeより速く、SQLとベクトルが1本）
-- **既存MySQLアプリへの追加** → TiDB（テーブル構造やJOINをそのまま流用できる）
+- **プロトタイプ・ローカル** → ChromaDB 一択。`pip install` して終わり
+- **クラウド本番・チーム共有** → TiDB（Pinecone より速くて SQL とベクトルが 1 本）
+- **既存 MySQL アプリに追加** → TiDB（JOIN・集計がそのまま使える）
 
 ---
 
@@ -361,15 +302,17 @@ M2DX・MIDI2Kit の実コミット20件を3評価者（Claude / Codex / Gemini�
 
 | 検証内容 | 結論 |
 |---|---|
-| 3DB の検索品質 | Top-5一致率98〜99%。品質差は誤差の範囲 |
-| 3DB のIngest速度 | ChromaDB 2.6件/秒 > TiDB 0.9 > Pinecone 0.6 |
+| 3DB の検索品質 | Top-5 一致率 98〜99%。DB で品質は変わらない |
+| 3DB の Ingest 速度 | ChromaDB 2.6件/秒 > TiDB 0.9 > Pinecone 0.6 |
 | 3DB の検索レイテンシ | ChromaDB 42ms ≪ TiDB 1,157ms < Pinecone 1,623ms |
-| RAG効果 | 全DB平均+1〜+1.6点の改善。75%のコミットで有効 |
-| HTAP | TiDB: 30件/分のINSERT中もOLAP 14msで安定。SQLite+Chromaは2システム管理が必要 |
+| RAG 効果 | 全 DB 平均 +1〜+1.6 点改善。75% のコミットで有効 |
+| HTAP | TiDB: 30件/分 INSERT 中も OLAP 14ms で安定。SQLite + Chroma は 2 システム管理が必要 |
 
-ローカルLLMのRAG強化としては、**まずChromaDBで試して、スケール・共有・分析が必要になったらTiDBへ移行**という流れが現実的だ。TiDBはSQLとベクトル検索を1本に集約できるため、LoRAデータ収集のような「書きながら集計する」ユースケースとの相性がよい。
+まずは ChromaDB でプロトタイプして、スケールアウトや分析が必要になったら TiDB に移行、が現実的かな。LoRA のデータ収集みたいに「書きながら集計もしたい」ユースケースには TiDB の相性がよさそう。
 
 コード: https://github.com/hakaru-dev/M2LoRA（記事公開後にpublic化予定）
+
+まだまだ続く。。。
 
 ---
 

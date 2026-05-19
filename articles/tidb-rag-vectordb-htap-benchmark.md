@@ -1,5 +1,5 @@
 ---
-title: "ベクトルDB 3択を性能で測った + TiDB の HTAP を実証した — TiDB / ChromaDB / Pinecone"
+title: "コミット 421 件が LoRA 学習データになるまで — 個人開発の AI データ基盤を TiDB / ChromaDB / Pinecone で実測した話"
 emoji: "📊"
 type: "tech"
 topics: ["tidb", "rag", "llm", "vectordatabase", "swift"]

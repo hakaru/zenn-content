@@ -3,7 +3,7 @@ title: "コミット 421 件が LoRA 学習データになるまで — TiDB/Chr
 emoji: "📊"
 type: "tech"
 topics: ["tidb", "rag", "llm", "vectordatabase", "swift"]
-published: false
+published: true
 ---
 
 ## はじめに
@@ -63,13 +63,13 @@ async def _cached_embed(text: str) -> list[float]:
 _ret_mod.embed = _cached_embed
 ```
 
-...と思ったら Phase 0 のキャッシュ計算が `_original_embed` を直接呼んでいてキャッシュに書き込まれていなかった。「embed cache 保存: 0 件」。。。`_cached_embed` 経由に直したら正常に動作。こういうバグに気づかないまま計測してたら嫌だった。
+...と思ったら Phase 0 のキャッシュ計算が `_original_embed` を直接呼んでいてキャッシュに書き込まれていなかった。「embed cache 保存: 0 件」。。。`_cached_embed` 経由に直したら正常に動作。
 
 ---
 
 ## ベンチマーク① — Ingest & Search
 
-SQLite から `avg_score ≥ 4.0` の高品質レビュー 94 件を取得。70 件で ingest、20 件で検索のベンチを取った。
+SQLite から `avg_score ≥ 4.0` の高品質レビュー 94 件を取得。70 件で ingest、20 件で検索のベンチ取得
 
 ### Ingest スループット（70件）
 
@@ -79,7 +79,7 @@ SQLite から `avg_score ≥ 4.0` の高品質レビュー 94 件を取得。70 
 | TiDB Serverless | 79.4 秒 | 0.9 件/秒 |
 | Pinecone Serverless | 111.8 秒 | 0.6 件/秒 |
 
-ローカル vs クラウドの差がそのまま出た。クラウド同士だと TiDB が Pinecone の 1.5 倍速い。
+ローカル vs クラウドの差がそのまま出ただけですかね。クラウド同士だと TiDB が Pinecone の 1.5 倍速い。
 
 ### 検索レイテンシ（20クエリ、embedding 時間を除くDB単体）
 
@@ -142,7 +142,8 @@ WHERE diff_embedding IS NOT NULL
 GROUP BY review_model;
 ```
 
-これと同じテーブルにベクトルも入っている。管理するシステムは 1 つで済む。
+これがTiDBの売りなんですが。。。
+同じテーブルにベクトルも入っている。管理するシステムは 1 つで済む。
 
 TiDB の HTAP（= Hybrid Transactional/Analytical Processing、トランザクションと分析を同一 DB でこなすアーキテクチャ）は行ストア（TiKV）と列ストア（TiFlash）を内部で分離していて、INSERT と AVG/GROUP BY が互いに干渉しないらしい。本当にそうなのか測ってみた。
 
@@ -213,11 +214,11 @@ M2DX → 1Take → 次のアプリ、と増えていっても `project` カラ�
 
 ---
 
-一言で言うと **「CI/CD の感覚で品質を追い続ける個人開発スタイル」** にフィットする。
+一言で言うと **「CI/CD の感覚で品質を追い続ける開発スタイル」** にフィットする。
 
-コミットが来るたびに自動で蓄積されて、いつでも「最近のスコアトレンド」「モデル世代の比較」「プロジェクト横断の傾向」が SQL で引ける状態。単一クエリの速度より「ベクトルと集計が同じ場所にある」ことの方が日々の開発で効いてくる。
+コミットが来るたびに自動で蓄積されて、いつでも「最近のスコアトレンド」「モデル世代の比較」「プロジェクト横断の傾向」が SQL で引ける状態。単一クエリの速度より「ベクトルと集計が同じ場所にある」ことの方が日々の開発で効いてくる。かも。。
 
-今の M2LoRA がちょうどそこに向かっているので、スケールすれば自然にフィットしてくるはず。
+とはいえ規模感ですかね。。そこまで現実的に大きなプロジェクトにならない気がしますが、、、
 
 ---
 

@@ -218,6 +218,80 @@ iOSではAUv3は常にout-of-processで動作します。
 
 ---
 
+## Logic Proで実際に弾いて見つかった問題
+
+AUv3がLogic Proに読み込めるようになって初めて鍵盤で弾くと、コードレビューやテストでは発見できなかった問題が出てきました。
+
+### 問題1: Attack Gainノブが効かない
+
+`AUParameterTree` の配線は正しかったのに、弾いても何も変わりませんでした。
+
+```cpp
+// NG: Sustain中は常に ag = 1.0 になっていた
+if (framesSinceOn < attackEnd) {  // attackEnd = 50ms相当
+    const float ag = s.attackGain_.load(...);
+    ...
+}
+
+// OK: framesSinceOnガードを撤廃
+const float ag = s.attackGain_.load(...);
+```
+
+`framesSinceOn < attackEnd` が条件についていたため、アタック開始50ms後（ほぼ常時Sustain中）はゲイン1.0固定になっていました。
+
+### 問題2: 低音域（MIDI 46以下）が発振する
+
+低音の鍵盤を弾くと音が減衰せず膨張し続けました。原因はモード振幅ブーストの計算パスにクランプが抜けていたことでした。
+
+```cpp
+// ETI_MKIIパス — クランプなし（NG）
+const float logB = a * (note - refNote) + b;
+return std::exp(logB);  // 低音では 2.0 まで増大
+
+// OK: RhodesClassicパスと統一
+return std::min(std::exp(logB), 1.2f);
+```
+
+RhodesClassic の直接テーブルパスには `std::min(..., 1.2)` が入っていましたが、ETI_MKIIの線形補間パスには入っていませんでした。物理シミュレーションのモードに >1.0 のブーストが入ると、エネルギーが消費されずに蓄積して発振します。
+
+### 問題3: ダンパー音・ペダルクリックが大きすぎ、独立調整不可
+
+ETI Roads MKII の REL サンプルは全鍵 peak ≈ 0.944 に正規化されています。ゲインスケールなしで加算するとノートオフのたびに「ゴツッ」という大きな音がします。
+
+当初 NoiseVolume で制御しようとしましたが、攻撃音と連動してしまいます。また Physics の振幅を Sustain→Release 境界でステップ変化させる方法も試しましたが、これがクリックノイズになるだけでした（即 revert）。
+
+解決策は **独立したパラメータを追加する** ことでした。
+
+```cpp
+// HybridVoice::Impl に追加
+std::atomic<float> releaseGain_{0.25f};  // -12dB default
+
+// PedalNoiseOneShot に追加  
+std::atomic<float> gain_{0.25f};  // -12dB default
+```
+
+```
+パラメータ構成（最終）:
+  addr 0:  Master Gain
+  addr 1:  Hammer Hardness
+  addr 2:  Pickup Position
+  addr 3:  Tremolo Rate
+  addr 4:  Tremolo Depth
+  addr 5:  Chorus Rate
+  addr 6:  Chorus Depth
+  addr 7:  Noise Volume     ← アタック音量
+  addr 8:  Attack Gain
+  addr 9:  Release Time
+  addr 10: Phaser Rate
+  addr 11: Phaser Depth
+  addr 12: Damper Volume    ← ダンパークリック独立
+  addr 13: Pedal Volume     ← ペダルクリック独立
+```
+
+デフォルト 0.25（-12dB）でどちらも控えめに調整済み。弾きながらゼロにすれば完全無音にもできます。
+
+---
+
 ## マルチエージェント開発
 
 コードレビューに **Copilot CLI** と **Codex CLI** を並列で使っています。両者の観点が補完的でした:
@@ -241,8 +315,9 @@ scripts/review.sh --title my-change --base main
 
 - **テスト**: 77 tests / 0 failures（CoreTests / IntegrationTests / AudioRegressionTests / DDSPStatefulTests）
 - **CPU**: 16音ポリフォニー @ 44.1kHz で実時間の1/4未満
-- **FX**: Tremolo（bi-phaseステレオ、RhodesSuitcaseスタイル）/ Chorus / Phaser / NeveFX
-- **実機**: macOS + iPhone 14 Pro Max + iPhone 15 Pro Max にインストール済み
+- **FX**: Tremolo（bi-phaseステレオ、RhodesSuitcaseスタイル）/ Chorus / Phaser
+- **パラメータ**: 14個（Master Gain / Hammer / Pickup / Tremolo / Chorus / Noise Volume / Attack Gain / Release Time / Phaser / **Damper Volume** / **Pedal Volume**）
+- **実機**: macOS Logic Pro で MIDI 鍵盤演奏・ペダル動作確認済み
 - **監査修正済み**: セキュリティ監査 3 High / コードレビュー 4 Critical をサブエージェント駆動開発で全対応
 - **残**: β評価（5〜10人）→ RC評価（20人）→ Phase 7（codesign / App Store提出）
 

@@ -386,6 +386,7 @@ TiDB は「スコアが高くて類似した diff だけ引いてくる」「世
 - [（３）aider 編 — 参照軸は改善、知識軸は依然ダメ](https://zenn.dev/hakaru/articles/m2dx-local-llm-agentic-harness-eval)
 - [（４）LoRA 編 — 誤検知 93% 削減](https://zenn.dev/hakaru/articles/swift-audit-lora-fp-reduction)
 - [（５）M2LoRA パイプライン編 — 開発しながら自動でデータが貯まる仕組み](https://zenn.dev/hakaru/articles/m2lora-code-review-pipeline)
+- [（番外②）性能編 — Ingest/Search を実測 + TiDB HTAP を実証](https://zenn.dev/hakaru/articles/tidb-rag-vectordb-htap-benchmark)
 :::
 
 *本記事は [Zennfes Spring 2026 × TiDB](https://zenn.dev/contests/zennfes-spring-2026-tidb) への応募作品です。*

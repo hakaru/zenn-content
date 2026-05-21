@@ -3,7 +3,7 @@ title: "ローカルLLMって本当に開発に使える？（５）開発しな
 emoji: "🔄"
 type: "tech"
 topics: ["llm", "lora", "ollama", "python", "swift"]
-published: false
+published: true
 ---
 
 :::message

@@ -1,32 +1,18 @@
 ---
-title: "コミット 421 件が LoRA 学習データになるまで — TiDB/ChromaDB/Pinecone で実測した AI データ基盤"
+title: "「書きながら集計したい」個人開発者が TiDB を選んだ理由 — HTAP をコードレビュー基盤で実測"
 emoji: "📊"
 type: "tech"
 topics: ["tidb", "rag", "llm", "vectordatabase", "swift"]
 published: true
 ---
 
-## はじめに
+TiDB Serverless で **INSERT を 30件/分 投入し続けても OLAP クエリの p50 が 14ms で安定する**ことを実測した。SQLite + ChromaDB の 2 システム構成と同条件で比較した結果も合わせて、ベクトル DB 選定の実データを共有する。
 
-iOS/macOS アプリを個人開発中！
+[前の記事（番外編①）](https://zenn.dev/hakaru/articles/tidb-rag-code-review-vector-comparison) でローカル LLM コードレビューに TiDB / ChromaDB / Pinecone の 3 DB を使った RAG を試して、品質はどの DB もほぼ同じ（Top-K 一致率 98〜99%、全 DB で +1〜+1.6 点改善）と分かった。
 
-**1Take** — ミュージシャン向け録音 iOS アプリ。録音ボタン 1 つで LA-2A / 1176 系のリアルタイムコンプレッサー掛け取り。
+じゃあ何で DB を選ぶのか。
 
-https://apps.apple.com/us/app/1take/id6757945099
-
-**M2DX** — iOS/macOS 向け MIDI 2.0 対応 DX7 互換 FM シンセサイザー。TestFlight で公開ベータ配布中。
-
-https://testflight.apple.com/join/BAtGszPw
-
----
-
-[前の記事（番外編）](https://zenn.dev/hakaru/articles/tidb-rag-code-review-vector-comparison) でローカル LLM コードレビューに TiDB / ChromaDB / Pinecone の 3 DB を使った RAG を試した。
-
-RAG の品質（レビュースコア改善幅）はどの DB もほぼ同じだった。全 DB で +1〜+1.6 点、Top-K 一致率も 98〜99% で誤差の範囲。**DB を変えても検索品質は変わらない**、というのが前回の結論。
-
-じゃあ何で DB を選ぶんだという話になる。
-
-今回は **性能（Ingest スループット・検索レイテンシ）** と **運用コスト（2システム問題と HTAP）** を実測した。
+今回は **性能（Ingest スループット・検索レイテンシ）** と **運用コスト（2 システム問題と HTAP）** を実測した。後半では「個人開発で TiDB を選ぶと何が嬉しいか」を、朝のダッシュボードを開く場面から書いている。
 
 ---
 
@@ -216,9 +202,9 @@ M2DX → 1Take → 次のアプリ、と増えていっても `project` カラ�
 
 一言で言うと **「CI/CD の感覚で品質を追い続ける開発スタイル」** にフィットする。
 
-コミットが来るたびに自動で蓄積されて、いつでも「最近のスコアトレンド」「モデル世代の比較」「プロジェクト横断の傾向」が SQL で引ける状態。単一クエリの速度より「ベクトルと集計が同じ場所にある」ことの方が日々の開発で効いてくる。かも。。
+コミットが来るたびに自動で蓄積されて、いつでも「最近のスコアトレンド」「モデル世代の比較」「プロジェクト横断の傾向」が SQL で引ける状態。単一クエリの速度より「ベクトルと集計が同じ場所にある」ことの方が日々の開発で効いてくる。
 
-とはいえ規模感ですかね。。そこまで現実的に大きなプロジェクトにならない気がしますが、、、
+個人開発の規模だと TiDB の本領（水平スケール、大量トラフィック下の HTAP）はまだ眠っている。でもコミットが 1,000、10,000 と増えたときに 2 システム構成のままだと運用が破綻するのは目に見えていて、今のうちから 1 本にしておく投資は悪くない、というのが今回の体感。
 
 ---
 
@@ -236,6 +222,21 @@ M2DX → 1Take → 次のアプリ、と増えていっても `project` カラ�
 - **書きながら集計もしたい** → TiDB（HTAP で書き込み負荷に強く、SQL で管理クエリが書ける）
 
 RAG 品質の比較は[前の記事](https://zenn.dev/hakaru/articles/tidb-rag-code-review-vector-comparison)に書いたのでそちらも。まだまだ続く。。。
+
+---
+
+:::details 対象プロジェクト
+
+**1Take** — ミュージシャン向け録音 iOS アプリ。録音ボタン 1 つで LA-2A / 1176 系のリアルタイムコンプレッサー掛け取り。
+
+https://apps.apple.com/us/app/1take/id6757945099
+
+**M2DX** — iOS/macOS 向け MIDI 2.0 対応 DX7 互換 FM シンセサイザー。TestFlight で公開ベータ配布中。
+
+https://testflight.apple.com/join/BAtGszPw
+
+**M2LoRA** — 上記アプリのコミットを自動レビュー・採点・合成して LoRA 学習データを溜めるパイプライン（本記事の題材）。
+:::
 
 ---
 

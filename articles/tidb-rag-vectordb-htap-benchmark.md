@@ -1,5 +1,5 @@
 ---
-title: "「書きながら集計したい」個人開発者が TiDB を選んだ理由 — HTAP をコードレビュー基盤で実測"
+title: "「書きながら集計したい」 TiDB を選んだ理由 — HTAP をコードレビュー基盤で実測"
 emoji: "📊"
 type: "tech"
 topics: ["tidb", "rag", "llm", "vectordatabase", "swift"]

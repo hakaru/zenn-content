@@ -299,12 +299,102 @@ model.save_pretrained_gguf("/root/out", tokenizer, quantization_method="q4_k_m")
 
 ---
 
+## 追記: v4 SFT を回した（2026-05-24）
+
+v3 の反省を踏まえて v4 を回したので結果も書いておく。
+
+### データ品質の罠を潰す
+
+v3 のときの学習データ 38 件は「Codex が 93% NULL で claude+gemini の 2-evaluator mean」だった。これがマズい。export.py の `statistics.mean(scores)` は欠損評価者を無視して残ったものだけで平均するので、**「1人だけ高得点を付けたレコード」が閾値を通ってしまう**。
+
+実 DB を集計したら `avg≥5.0 unflagged` の 75% が **partial-triplet** だった。「閾値 5.0」と言いながら実態は「2人平均で 5.0」。
+
+v4 では:
+- export.py を **triplet-only** に強制（`WHERE claude_score IS NOT NULL AND codex_score IS NOT NULL AND gemini_score IS NOT NULL`）
+- `--min-score` を CLI フラグに昇格
+- partial で書き込むと stddev=0.0 が出て flag をすり抜ける罠も同時修正
+
+結果として **42 件 (triplet only, avg≥5.0)** で学習。v3 の 38 件と件数は近いが、データ品質は段違いに上がっている。
+
+### MAX_SEQ_LENGTH = 8192
+
+v3 は `MAX_SEQ_LENGTH=2048` だったが、計算したら 42 件の **49%（21 件）が 2048 で truncate される**サイズだった。SFTTrainer は黙って打ち切るので、半数が「output が途中で切れたまま学習」させていたことになる。これでは loss が下がりきらないのも当然。
+
+v4 は **8192** に上げて全件カバー（最大 28K chars ≒ 10K token）。H100 80GB なら VRAM 余裕。
+
+### eval split を入れる
+
+v3 は全件 train で eval なし。v4 は **EVAL_RATIO=0.15** を入れて train=35 / eval=7 に分割。`eval_strategy="steps"` + `eval_steps=10` + `load_best_model_at_end=True` で best checkpoint を自動選択。
+
+### 新しい罠
+
+torch 2.5 → 2.6 に上げる必要が出てきた。
+
+**新 unsloth (>=2025.12) は trl>=0.18.2 を要求し、それが torch>=2.6 の `FSDPModule` を要求する**。`pytorch:2.4.0` ベースで torch 2.5.1 のままだと:
+
+```
+ImportError: cannot import name 'FSDPModule' from 'torch.distributed.fsdp'
+```
+
+torch 2.6.0 cu124 に上げると今度は **torchao が壊れる**:
+
+```
+AttributeError: module 'torch.utils._pytree' has no attribute 'register_constant'
+```
+
+torchao 0.17+ が torch 2.7 API を要求しているため。`transformers` が import するので、**torchao を明示的に uninstall** する必要がある。
+
+さらに **cudnn ライブラリパス問題**。`pip install nvidia-cudnn-cu12` しても wheel は `__init__.py` だけで `libcudnn.so.9` を含まない。conda ベースイメージの実体は `/opt/conda/pkgs/pytorch-2.4.0-py3.11_cuda12.4_cudnn9.1.0_0/lib/python3.11/site-packages/torch/lib/` に居るので、新 torch の lib dir に symlink する:
+
+```bash
+CONDA_CUDNN=/opt/conda/pkgs/pytorch-2.4.0-py3.11_cuda12.4_cudnn9.1.0_0/lib/python3.11/site-packages/torch/lib
+TORCH_LIB=/opt/conda/lib/python3.11/site-packages/torch/lib
+for f in libcudnn.so.9 libcudnn_{adv,cnn,engines_precompiled,engines_runtime_compiled,graph,heuristic,ops}.so.9; do
+  ln -sf $CONDA_CUDNN/$f $TORCH_LIB/$f
+done
+```
+
+これに気付くまで 1 時間溶けた。。。
+
+### 評価者再走で踏んだクォータの罠
+
+v4 学習データを増やすため、過去レコードの NULL スコアを `refill_evaluators.py` で補完しようとした。`claude+gemini` で 350 件くらい走ったところで突然全失敗。直接叩いて確認したら:
+
+```
+TerminalQuotaError: You have exhausted your capacity on this model.
+Your quota will reset after 18h1m4s.
+```
+
+**Gemini CLI は 18 時間で枯渇**する。Codex は別途 3 時間で枯渇。両方枯渇すると Claude しか動かせない（17 件しか triplet 完成しない）ので、運用上は **「Codex（3h）」と「Gemini（18h）」のリセットタイミングを意識**して refill する必要がある。
+
+v4 は Gemini 復活を待たずに、現状の triplet 42 件で smoke run することにした。
+
+### v4 結果
+
+| 指標 | v3 | v4 |
+|---|---|---|
+| サンプル数 | 38（partial-triplet 込み） | **42（triplet only）** |
+| MAX_SEQ_LENGTH | 2048（49% truncate） | **8192（全件カバー）** |
+| eval split | なし | **15%（valid=7件）** |
+| train_loss | 1.462 | **1.605** |
+| eval_loss_best | — | **1.500** |
+| 学習時間 | 514s（A100-SXM4） | **361s（H100 SXM 80GB）** |
+| コスト | ~$24 | **~$5** |
+| インスタンス | A100 / $1.175/h | H100 / $2.72/h |
+
+train_loss が v3 より少し高いのは、v4 のほうがデータ量・seq 長ともに大きく難しいタスクになっているからだと思う。eval_loss=1.50 が train_loss より低いのは load_best_model_at_end で最良チェックポイント（step 70）が選ばれているため。汎化はできている。
+
+GGUF 変換は disk 容量問題を解消してから別途実施（300GB 必要だが今回の H100 instance は disk 100GB で起動してしまった）。adapter 本体（278MB）はローカルに rsync 済み。
+
+---
+
 ## 現状と次回
 
-v3 GGUF は adapter stacking ミスにより使用不可（garbage 出力）。v3 SFT adapter 本体（531MB）はローカルに保存済みで、正しい変換手順が判明したので次回再挑戦する。
+v3 GGUF は adapter stacking ミスにより使用不可（garbage 出力）。v3 SFT adapter（531MB）と **v4 SFT adapter（278MB）** はローカルに保存済み。
 
-現在の学習データ: 38件（閾値 5.0 に変更）。  
-M2DX は 159 件全処理済み。次の SFT は adapter を正しくスタックして GGUF 変換まで完走させる。
+次は v4 を GGUF に変換して Ollama に登録するところまで完走させる。disk 300GB の VAST.ai instance で再挑戦予定。
+
+その後 Codex / Gemini クォータが復活したら refill を再開して v5 候補のデータを増やしていく。
 
 ---
 

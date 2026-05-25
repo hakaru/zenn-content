@@ -243,17 +243,67 @@ Codex が MIDI2Kit に CRITICAL 3件を出した:
 
 3件とも修正して705テスト全パス。結果は memdream に記録済み。M2DX のセッションで `memory_recall(project="midi2kit")` すると、この修正内容がエコシステム記憶として返ってくる。M2DX は MIDI2Kit に依存してるから。
 
+## dream-agent を実際に回してみた
+
+記事を書いてる途中にも observations が増えるので、dream-agent を走らせてみた。
+
+```
+🌙 memdream dream-agent 起動
+
+📊 対象プロジェクト: 6件
+   - 1take (7件の未統合観測, ecosystem: music-apps)
+   - memdream (6件の未統合観測)
+   - midi2kit (1件の未統合観測, ecosystem: m2dx-ecosystem)
+   - tinemodeler4 (1件の未統合観測, ecosystem: tinemodeler-ecosystem)
+   - m2dx (1件の未統合観測, ecosystem: m2dx-ecosystem)
+   - m2dx-core (1件の未統合観測, ecosystem: m2dx-ecosystem)
+
+  📦 1take: 7件の観測を処理中...
+    ✅ メモリ作成: "Paywall UX Optimization and Analytics Tracking Enhancements"
+  📦 memdream: 6件の観測を処理中...
+    ✅ メモリ作成: "MemDream Global Implementation and System Enhancements"
+
+🌐 m2dx-ecosystem: 3プロジェクト、3件のメモリを横断分析中...
+  ✅ エコシステムメモリ作成: "Concurrency Management and Buffer Optimization in m2dx-ecosystem"
+
+✨ Dream Run #30001 完了
+   観測処理数: 17
+   メモリ作成数: 7
+   トリプル作成数: 32
+```
+
+17件の新規 observations が処理されて、7件の統合メモリ + 32件のナレッジグラフトリプルが生成された。処理時間は約2分。
+
+ポイントは **冪等性**。前回の dream run で処理済みの168件はスキップされて、新規17件だけが処理される。`observations` テーブルの `consolidated` フラグ（BOOLEAN）で管理してる。
+
+```sql
+-- dream-agent が参照するクエリ
+SELECT * FROM observations
+WHERE project_id = ? AND consolidated = FALSE
+ORDER BY created_at ASC;
+
+-- 処理後に更新
+UPDATE observations SET consolidated = TRUE, dream_run_id = ?
+WHERE id IN (?);
+```
+
+この「フラグ + FK で処理済みを追跡」ができるのも RDB ならでは。ベクトル DB に boolean カラムや外部キーはない。
+
+エコシステム統合も面白い。m2dx-ecosystem（M2DX + M2DX-Core + MIDI2Kit）の3プロジェクトのメモリを横断分析して「Concurrency Management and Buffer Optimization」というエコシステムレベルの知見が自動生成された。*3つの別プロジェクトで同じ「並行性とバッファ管理」の問題を直してた、ということを AI が勝手にまとめてくれる。*
+
 ## 数字で見る memdream
 
 | 指標 | 値 |
 |---|---|
 | 登録プロジェクト | 8（M2DX, M2DX-Core, MIDI2Kit, 1Take, TineModeler3, TineModeler4, PeerClock, memdream） |
-| observations | 176 |
-| consolidated_memories | 19 |
-| knowledge_graph triples | 111 |
+| observations | 185 |
+| consolidated_memories | 26 |
+| knowledge_graph triples | 143 |
 | エコシステム | 3（m2dx-ecosystem, tinemodeler-ecosystem, music-apps） |
+| dream runs | 2回（初回168件 → 2回目17件、冪等に増分処理） |
 | TiDB ストレージ | 数 MB（無料枠の1%以下） |
 | エンベディング | Ollama bge-large, 1024次元, ローカル実行 |
+| 要約 LLM | Ollama qwen3:14b, ローカル実行 |
 
 全部ローカル + TiDB Cloud Serverless の無料枠で動いてる。外部 API キー不要。
 

@@ -8,7 +8,7 @@ published: false
 
 ## Claude Code、昨日の会話覚えてない問題
 
-iOS/macOS 向けの MIDI 2.0 FM シンセサイザー **M2DX** と、録音アプリ **1Take** を開発してる。どっちも TestFlight でベータ配布中。
+iOS/macOS 向けの MIDI 2.0 FM シンセサイザー **M2DX** と、録音アプリ **1Take** を並行開発してる。どっちも TestFlight でベータ配布中。
 
 https://testflight.apple.com/join/BAtGszPw
 
@@ -16,116 +16,45 @@ https://testflight.apple.com/join/BAtGszPw
 
 *「昨日直したあのバグ、今日のセッションでは忘れてる」*
 
-セッションが切れるとコンテキストがリセットされる。CLAUDE.md に書けば多少は残るけど、プロジェクトをまたいだ記憶は持てない。M2DX-Core で修正した SPSC リングバッファの問題、TineModeler3 にも同じパターンがあるのに、AI はそれを知らない。
+セッションが切れるとコンテキストがリセットされる。CLAUDE.md に書けば多少は残るけど、プロジェクトをまたいだ記憶は持てない。M2DX-Core で修正した SPSC リングバッファの問題が TineModeler3 にも同じパターンであるのに、AI はそれを知らない。
 
-で、作ったのが **memdream**。TiDB Cloud のベクトル検索を使って、AI コーディングアシスタントに「長期記憶」を持たせる MCP サーバー。
+で、作ったのが **memdream**。TiDB Cloud のベクトル検索を使って、AI コーディングアシスタントに「長期記憶」を持たせる仕組み。
 
 https://github.com/hakaru/memdream
 
-## なぜ TiDB なのか
+## 何が起きるようになったか
 
-ベクトル DB は選択肢が多い。Pinecone、Weaviate、Qdrant、pgvector…。その中で TiDB Cloud Serverless を選んだ理由は3つ。
+先に結果を書く。
 
-**1. HTAP（= トランザクション + 分析が同一 DB で動く）**
+M2DX のオーディオエンジンで `FXParamBox` というクラスが `os_unfair_lock` を使ってた。オーディオのレンダースレッドは「絶対にロックを取らない」が鉄則なんだけど、見落としてた。
 
-memdream は「観測の書き込み」と「ベクトル検索」を同時にやる。MCP ツールが `memory_observe` で INSERT したデータを、直後に `memory_search` で `VEC_COSINE_DISTANCE` 検索する。普通の RDB にベクトル拡張を足しただけだと、書き込み直後の検索が遅延したりする。TiDB は TiFlash レプリカにベクトルインデックス（HNSW）を持てるので、書き込みはそのまま MySQL 互換の行ストアに入り、検索は列ストア側で走る。
+Codex と Gemini の両方が同じ場所を指摘して、memdream に記録した。
 
-```sql
--- 普通の INSERT（行ストア）
-INSERT INTO observations (project_id, title, content, embedding, ...)
-VALUES (?, ?, ?, ?, ...);
+その後、別のプロジェクト TineModeler3 のセッションで `memory_search("lock-free audio thread")` すると、M2DX の修正履歴がヒットする。「Atomic triple buffer で置き換えた」という具体的な解決策付き。
 
--- 直後にベクトル検索（TiFlash の HNSW）
-SELECT *, VEC_COSINE_DISTANCE(embedding, ?) AS distance
-FROM observations
-WHERE embedding IS NOT NULL
-ORDER BY distance ASC
-LIMIT 10;
-```
+*プロジェクトが違うのに、同じ問題の解決策が引ける。*
 
-これが同じテーブルに対して同時に走る。別々の DB を立てる必要がない。
+これが「長期記憶」の効果。1回の修正経験が、他のプロジェクトの未来のセッションに伝播する。
 
-**2. MySQL 互換**
+## 記憶の3層構造 — ここが設計の肝
 
-`mysql2/promise` でそのまま繋がる。ORM 不要。TLS 必須だけど `ssl: { minVersion: "TLSv1.2" }` を足すだけ。
+memdream の記憶は3層ある。人間の記憶と同じで、生の体験をそのまま全部覚えてるわけじゃない。
 
-```typescript
-import { createPool } from "mysql2/promise";
-const pool = createPool({
-  host: process.env.TIDB_HOST,   // gateway01.ap-northeast-1.prod.aws.tidbcloud.com
-  port: 4000,
-  user: process.env.TIDB_USER,
-  password: process.env.TIDB_PASSWORD,
-  database: "memdream",
-  ssl: { minVersion: "TLSv1.2" },  // ← これだけ
-  connectionLimit: 5,
-});
-```
+**1層目: 観測（observations）** — 生の作業ログ
 
-ベクトル専用 DB だと独自クライアントや REST API が必要になるけど、TiDB は使い慣れた MySQL ドライバーでいい。
+「1Take の paywall バグを直した」「M2DX のオーディオスレッド安全性をレビューした」「TineModeler3 の SPSC リングを Atomic 化した」…。セッション中に起きたことをそのまま記録する。今185件ある。
 
-**3. Serverless の無料枠が実用的**
+**2層目: 統合記憶（consolidated memories）** — 要約された知見
 
-TiDB Cloud Serverless は月 25 GiB ストレージ + 250M RU（Request Unit）が無料。個人の開発記憶用途なら余裕で収まる。今 168 observations + 19 consolidated memories + 111 knowledge graph triples が入ってて、ストレージは数 MB。
+観測が溜まってくると、ノイズが多すぎて検索精度が落ちる。だから dream-agent というバッチ処理で、12件ずつまとめてローカル LLM（Ollama qwen3:14b）に「要約して」と投げる。
 
-## スキーマ設計: ベクトルと RDB の合わせ技
+例えば M2DX の観測12件が「M2DX RT-Safety とロックフリーアーキテクチャ修正」という1つの統合記憶に昇華される。今26件。
 
-TiDB の面白いところは「普通の RDB テーブルにベクトルカラムを足せる」こと。
+ここにスコープの概念がある。project（プロジェクト単位）、ecosystem（プロジェクト群単位）、global（全体）の3段階。M2DX と MIDI2Kit と M2DX-Core は m2dx-ecosystem として括られてるので、M2DX のセッションで `memory_recall` すると MIDI2Kit の修正履歴も一緒に返ってくる。
 
-```sql
-CREATE TABLE observations (
-  id BIGINT AUTO_INCREMENT PRIMARY KEY,
-  project_id BIGINT NOT NULL,
-  title VARCHAR(256) NOT NULL,
-  content TEXT NOT NULL,
-  type VARCHAR(32),
-  -- ↓ ここがベクトル
-  embedding VECTOR(1024),
-  embedding_model VARCHAR(64) DEFAULT 'bge-large',
-  -- ↓ 重複排除: 同じ内容を二重記録しない
-  content_hash VARCHAR(64) AS (SHA2(CONCAT(project_id, ':', title, ':', LEFT(content, 1000)), 256)) STORED,
-  UNIQUE INDEX idx_content_dedup (content_hash),
-  FOREIGN KEY (project_id) REFERENCES projects(id)
-);
-```
+*依存してるプロジェクトの記憶を自動で引っ張ってくる。* これはプロジェクト名を手で指定するんじゃなくて、DB のエコシステム定義から自動展開される。
 
-`content_hash` は生成カラム（STORED）。`project_id:title:content[:1000]` の SHA2 ハッシュを自動計算して UNIQUE 制約をかける。`INSERT IGNORE` すれば同じ内容の二重登録をゼロコストで弾ける。
-
-*これ、ベクトル専用 DB だとできない。* Pinecone や Qdrant にはトランザクション制約もハッシュ生成カラムもない。RDB の機能とベクトル検索が同居してるのが TiDB の強み。
-
-ベクトルインデックスは HNSW で作る:
-
-```sql
-ALTER TABLE observations SET TIFLASH REPLICA 1;
-ALTER TABLE observations ADD VECTOR INDEX idx_obs_vec ((VEC_COSINE_DISTANCE(embedding)))
-  USING HNSW;
-```
-
-TiFlash レプリカを1つ追加して、その上に HNSW インデックスを張る。検索は自動で TiFlash 側に飛ぶので、行ストアへの書き込み性能には影響しない。
-
-## 3つのテーブルで「記憶の階層」を作る
-
-memdream のスキーマは6テーブルあるけど、記憶の本体は3つ。
-
-| テーブル | 役割 | ベクトル |
-|---|---|---|
-| `observations` | 生の記録。「何を見つけたか」 | ✅ VECTOR(1024) |
-| `consolidated_memories` | dream 処理後の要約。「何を学んだか」 | ✅ VECTOR(1024) |
-| `knowledge_graph` | 関係性。「何が何に依存してるか」 | なし（RDF トリプル） |
-
-観測（observations）は日々のセッションで `memory_observe` 経由で溜まる。1Take の paywall バグ修正、M2DX のオーディオスレッド安全性レビュー、TineModeler3 の SPSC リング修正…。生の作業ログ。
-
-統合記憶（consolidated_memories）は dream-agent が作る。観測を12件ずつまとめて Ollama qwen3:14b に「要約して」と投げ、結果をベクトル化して格納。`scope` カラムで project / ecosystem / global の3段階にスコープ分け。
-
-```sql
--- エコシステム横断の統合記憶を取得
-SELECT * FROM consolidated_memories
-WHERE (scope = 'project' AND scope_ref IN ('m2dx', 'm2dx-core', 'midi2kit'))
-   OR (scope = 'ecosystem' AND scope_ref = 'm2dx-ecosystem')
-ORDER BY created_at DESC;
-```
-
-ナレッジグラフ（knowledge_graph）は主語-述語-目的語のトリプル。
+**3層目: ナレッジグラフ（knowledge graph）** — 関係性
 
 ```
 M2DX --implements--> lock-free triple buffer
@@ -133,199 +62,127 @@ M2DX --depends-on--> MIDI2Kit
 TineModeler3 --fixed--> SPSC data race
 ```
 
-ベクトル検索で「意味的に近い記憶」を引き、ナレッジグラフで「構造的な関係」を引く。両方あるから「M2DX のロックフリー設計どうだっけ？」と聞くと、過去のレビュー結果と関連プロジェクトの修正履歴がまとめて返ってくる。
+主語-述語-目的語のトリプル。今143件。「M2DX が何を実装してるか」「何に依存してるか」が構造的に引ける。ベクトル検索は「意味的に近いもの」を引くけど、ナレッジグラフは「構造的に繋がってるもの」を引く。両方あるから精度が出る。
 
-## MCP サーバーで AI ツールと繋ぐ
+## なぜ TiDB なのか — RDB の機能がそのまま使える
 
-memdream は MCP（Model Context Protocol）サーバーとして Claude Code に接続する。stdio トランスポートでステートレス。9つのツールを公開。
+ベクトル DB は選択肢が多い。Pinecone、Weaviate、Qdrant、pgvector…。その中で TiDB Cloud Serverless を選んだ。
 
-```bash
-# ユーザースコープで登録（全プロジェクトで使える）
-claude mcp add-json -s user memdream '{
-  "command": "node",
-  "args": ["/path/to/memdream/packages/mcp-server/dist/index.js"],
-  "env": { "TIDB_HOST": "...", ... }
-}'
-```
+理由は「ベクトル検索以外のことも全部やりたかった」から。
 
-実際の使われ方はこう:
+memdream の記憶は「書いて、検索して、重複を弾いて、関係性を辿って、フラグで処理済みを管理する」という一連の操作の組み合わせ。ベクトル検索はその中の1つでしかない。
 
-```
-# セッション開始時（自動）
-memory_session_start(project="m2dx")
-→ 統合記憶5件 + ナレッジグラフ10件 + 最近の観測5件が返る
+具体的に TiDB の RDB 機能が効いてるところ:
 
-# 実装中に過去の知見を検索
-memory_search(query="SPSC リングバッファの修正")
-→ M2DX-Core と TineModeler3 の両方の修正履歴がヒット
+**重複排除。** 同じ内容を2回記録しない仕組み。`content_hash` という生成カラム（project_id + title + content の SHA2 ハッシュを DB が自動計算）に UNIQUE 制約をかけてる。`INSERT IGNORE` 1文で済む。ベクトル DB だと「まず検索して類似度を見て、閾値以上なら書かない」というアプリ側のロジックが必要になる。
 
-# 作業完了時に記録
-memory_observe(project="m2dx", type="bugfix", title="FXParamBox lock-free化",
-  content="os_unfair_lock → Atomic triple buffer。レンダースレッド wait-free。")
-```
+**エコシステムの関係性管理。** projects テーブルに `ecosystem` カラムがあって、M2DX・M2DX-Core・MIDI2Kit が同じエコシステムに属してることを定義してる。`memory_recall` が呼ばれると、まずプロジェクトの所属エコシステムを引いて、同じエコシステム内の兄弟プロジェクトを展開して、そのプロジェクト群の統合記憶をまとめて返す。外部キーとJOINの世界。
 
-ここで TiDB の HTAP が効く。`memory_observe` の INSERT と `memory_search` の `VEC_COSINE_DISTANCE` が同じ DB に対して同時に走っても、行ストアと列ストアで分離されてるから干渉しない。
+**dream の冪等性。** observations テーブルに `consolidated` フラグ（BOOLEAN）があって、dream-agent が処理済みの観測にマークをつける。2回目の dream run は `WHERE consolidated = FALSE` で未処理分だけ拾う。初回168件 → 2回目17件、という増分処理が `UPDATE ... SET consolidated = TRUE` だけで実現できる。
 
-## 嵌まったポイント: TiDB の prepared statement と LIMIT
+*これ全部、ベクトル専用 DB だとアプリ側に持つ必要がある。* TiDB だと SQL で書くだけ。
 
-開発中に面白いバグに当たった。`pool.execute()` で `LIMIT ?` にパラメータを渡すと、TiDB が「Incorrect arguments to LIMIT」で落ちる。
+## HTAP — 書き込みと検索が干渉しない
 
-```typescript
-// ❌ これが動かない
-const sql = `SELECT * FROM observations ORDER BY distance ASC LIMIT ?`;
-await pool.execute(sql, [10]);
-// → "Incorrect arguments to LIMIT"
+TiDB の特徴で一番効いてるのが HTAP（Hybrid Transactional and Analytical Processing）。
 
-// ✅ バリデーション済みの値を直接埋め込む
-const limit = Math.min(Math.max(args.limit ?? 10, 1), 50);
-const sql = `SELECT * FROM observations ORDER BY distance ASC LIMIT ${limit}`;
-```
+memdream は「記録」と「検索」を同時にやる。Claude Code が `memory_observe` で観測を INSERT したすぐ後に、`memory_search` でベクトル検索を走らせる。同じテーブルに対して。
 
-MySQL の prepared statement で LIMIT にパラメータを渡すのは元々グレーゾーンらしいけど、TiDB では明確にエラーになる。`limit` は 1-50 の整数に事前バリデーション済みなので、直接埋め込みでも SQL インジェクションリスクはない。
+TiDB はこれを行ストア（TiKV）と列ストア（TiFlash）で分担する。INSERT は行ストアに書かれて、ベクトル検索は列ストア上の HNSW インデックスで走る。物理的に別のストレージエンジンで処理されるから、書き込みが検索を遅くしたり、その逆が起きたりしない。
 
-*レビューを依頼したら、レビュー対象のツール自体にバグがあって検索が動かない、という状況。* Codex と Gemini に memdream のフルレビューを依頼して、そのレビュー結果を memdream に記録しようとしたら `memory_search` が壊れてた。
+普通の RDB にベクトル拡張を足しただけだと（pgvector とか）、同じストレージ上で INSERT と検索が競合する。小規模なら問題ないけど、セッション中にリアルタイムで書き込みと検索が交互に走る memdream の用途だと、HTAP の恩恵がある。
 
-## dream-agent: 観測を「記憶」に昇華する
+## dream-agent — 「寝てる間に記憶を整理する」
 
-生の観測を溜めるだけだと、ノイズが多すぎて検索精度が落ちる。dream-agent は観測を統合記憶に昇華するバッチ処理。
+人間が寝てる間に記憶を整理するように、dream-agent は観測を統合記憶に昇華する。
+
+やってることはシンプルで:
+1. 未処理の observations をプロジェクト別に拾う
+2. 12件ずつチャンクにして、ローカル LLM に「要約して、関係性をトリプルで抽出して」と投げる
+3. 返ってきた JSON から統合記憶とナレッジグラフを INSERT
+4. 同じエコシステム内のプロジェクトをまたいだ横断分析もやる
+
+実際に走らせた結果:
 
 ```
-168 observations
-  → プロジェクト別にグループ化
-  → 12件ずつチャンク
-  → Ollama qwen3:14b で要約 + トリプル抽出（JSON）
-  → Ollama bge-large でベクトル生成
-  → consolidated_memories + knowledge_graph に INSERT
-  → dream_runs に完了記録
-```
-
-LLM の出力を JSON でパースするところが地味に面倒で、qwen3 は `<think>` ブロックを出力に混ぜてくるし、JSON を markdown フェンスで囲むこともある。防御的にパースしてる。
-
-```typescript
-function extractJSON(raw: string): object | null {
-  // qwen3 の <think>...</think> を除去
-  let cleaned = raw.replace(/<think>[\s\S]*?<\/think>/g, "");
-  // markdown フェンス除去
-  cleaned = cleaned.replace(/```json?\s*/g, "").replace(/```/g, "");
-  // JSON オブジェクトを抽出
-  const match = cleaned.match(/\{[\s\S]*\}/);
-  if (!match) return null;
-  return JSON.parse(match[0]);
-}
-```
-
-168件の観測を処理して、**19件の統合記憶 + 111件のナレッジグラフトリプル**が生成された。処理時間は約7分。
-
-## 実際に効果が出た例
-
-### M2DX: オーディオスレッドで os_unfair_lock を使ってた
-
-M2DX のオーディオエンジンで `FXParamBox` が `os_unfair_lock` を使っていた。オーディオレンダースレッドは「絶対にロックを取らない」が鉄則なのに。
-
-Codex と Gemini の両方が同じ場所を指摘。memdream に記録した。
-
-次に TineModeler3 のセッションで `memory_search("lock-free audio thread")` すると、M2DX の修正履歴がヒットする。「Atomic triple buffer で置き換えた」という具体的な解決策付き。
-
-*プロジェクトが違うのに、同じ問題の解決策が引ける。*
-
-### 1Take: レビュー結果が自動蓄積
-
-1Take のセッションで paywall 周りのバグ修正をやると、Claude Code が自動で `memory_observe` を呼んで記録してくれる。`~/.claude/CLAUDE.md` に「作業完了時は必ず memory_observe」と書いてあるから。
-
-次のセッションで `memory_session_start` すると、前回の修正内容が統合記憶として返ってくる。「あ、昨日 P-001 と P-002 直したんだった」と思い出す手間がない。
-
-### MIDI2Kit: CRITICAL 3件を発見 → 修正 → 記録
-
-Codex が MIDI2Kit に CRITICAL 3件を出した:
-- `PEManager.deinit` が continuation を resume せず破棄 → 永久ハング
-- `CoreMIDITransport` の mutable state がロックなし → データレース
-- SysEx7 受信バッファが無制限増加 → メモリ枯渇
-
-3件とも修正して705テスト全パス。結果は memdream に記録済み。M2DX のセッションで `memory_recall(project="midi2kit")` すると、この修正内容がエコシステム記憶として返ってくる。M2DX は MIDI2Kit に依存してるから。
-
-## dream-agent を実際に回してみた
-
-記事を書いてる途中にも observations が増えるので、dream-agent を走らせてみた。
-
-```
-🌙 memdream dream-agent 起動
-
 📊 対象プロジェクト: 6件
-   - 1take (7件の未統合観測, ecosystem: music-apps)
+   - 1take (7件の未統合観測)
    - memdream (6件の未統合観測)
-   - midi2kit (1件の未統合観測, ecosystem: m2dx-ecosystem)
-   - tinemodeler4 (1件の未統合観測, ecosystem: tinemodeler-ecosystem)
-   - m2dx (1件の未統合観測, ecosystem: m2dx-ecosystem)
-   - m2dx-core (1件の未統合観測, ecosystem: m2dx-ecosystem)
+   - midi2kit, tinemodeler4, m2dx, m2dx-core (各1件)
 
-  📦 1take: 7件の観測を処理中...
-    ✅ メモリ作成: "Paywall UX Optimization and Analytics Tracking Enhancements"
-  📦 memdream: 6件の観測を処理中...
-    ✅ メモリ作成: "MemDream Global Implementation and System Enhancements"
+🌐 m2dx-ecosystem: 3プロジェクト横断分析
+  ✅ "Concurrency Management and Buffer Optimization in m2dx-ecosystem"
 
-🌐 m2dx-ecosystem: 3プロジェクト、3件のメモリを横断分析中...
-  ✅ エコシステムメモリ作成: "Concurrency Management and Buffer Optimization in m2dx-ecosystem"
-
-✨ Dream Run #30001 完了
-   観測処理数: 17
-   メモリ作成数: 7
-   トリプル作成数: 32
+✨ 完了: 17観測 → 7メモリ + 32トリプル
 ```
 
-17件の新規 observations が処理されて、7件の統合メモリ + 32件のナレッジグラフトリプルが生成された。処理時間は約2分。
+m2dx-ecosystem の横断分析が面白い。M2DX と M2DX-Core と MIDI2Kit で別々に修正した並行性とバッファの問題を、AI が勝手に「このエコシステム全体の傾向」としてまとめてくれた。
 
-ポイントは **冪等性**。前回の dream run で処理済みの168件はスキップされて、新規17件だけが処理される。`observations` テーブルの `consolidated` フラグ（BOOLEAN）で管理してる。
+*3つのプロジェクトを個別に見てたら気づかないパターンが、エコシステム単位で見ると浮かび上がる。*
 
-```sql
--- dream-agent が参照するクエリ
-SELECT * FROM observations
-WHERE project_id = ? AND consolidated = FALSE
-ORDER BY created_at ASC;
+冪等性も確認済み。2回目の dream run では新規17件だけが処理されて、前回の168件はスキップされた。
 
--- 処理後に更新
-UPDATE observations SET consolidated = TRUE, dream_run_id = ?
-WHERE id IN (?);
-```
+## 1Take での実例 — レビュー結果が自動蓄積
 
-この「フラグ + FK で処理済みを追跡」ができるのも RDB ならでは。ベクトル DB に boolean カラムや外部キーはない。
+1Take は iOS/macOS の録音アプリ。クラウド同期（iCloud、Dropbox、Google Drive、Backblaze B2）と、最近 Pro 版（マルチカム同期録画）をリリースした。
 
-エコシステム統合も面白い。m2dx-ecosystem（M2DX + M2DX-Core + MIDI2Kit）の3プロジェクトのメモリを横断分析して「Concurrency Management and Buffer Optimization」というエコシステムレベルの知見が自動生成された。*3つの別プロジェクトで同じ「並行性とバッファ管理」の問題を直してた、ということを AI が勝手にまとめてくれる。*
+https://apps.apple.com/us/app/1take/id6757945099
 
-## 数字で見る memdream
+1Take のセッションで paywall 周りのバグ修正をやると、Claude Code が自動で `memory_observe` を呼んで記録してくれる。`~/.claude/CLAUDE.md` に「作業完了時は必ず memory_observe で記録すること」と書いてあるから。
+
+実際に蓄積されたのがこういう記録:
+
+- paywall_purchase_tapped に source パラメータ追加
+- recording_saved paywall を初回保存のみ表示に変更
+- v2.2.2 (build 18) アーカイブ・ASCアップロード完了
+- 3モデルレビュー結果 — P-001/P-002 正確性確認
+
+次のセッションで `memory_session_start` すると、これが統合記憶として返ってくる。「あ、昨日 paywall 周り2件直して審査に出したんだった」と、文脈ゼロから再開できる。
+
+## MIDI2Kit — エコシステム記憶が依存先のバグを防ぐ
+
+MIDI2Kit は M2DX が依存してる MIDI 2.0 ライブラリ。Codex にレビューさせたら CRITICAL が3件出た:
+
+- `PEManager.deinit` が非同期の continuation を resume せずに破棄 → 呼び出し元が永久ハング
+- `CoreMIDITransport` の設定プロパティが同期なしで concurrent access → データレース
+- SysEx7 受信バッファがサイズ制限なしで際限なく増える → メモリ枯渇
+
+3件とも修正して705テスト全パス。結果は memdream に記録済み。
+
+ここからが memdream の本領。M2DX のセッションで `memory_recall(project="m2dx", scope="ecosystem")` すると、MIDI2Kit の修正内容がエコシステム記憶として返ってくる。M2DX は MIDI2Kit に依存してるから。
+
+*依存ライブラリで直したバグが、依存元のプロジェクトの文脈に自動で入ってくる。*
+
+手動で「あ、MIDI2Kit で先週こういう修正したから M2DX でも気をつけないと」って思い出す必要がない。DB のエコシステム定義と SQL の OR 条件が、そこを自動化してくれる。
+
+## 数字
 
 | 指標 | 値 |
 |---|---|
-| 登録プロジェクト | 8（M2DX, M2DX-Core, MIDI2Kit, 1Take, TineModeler3, TineModeler4, PeerClock, memdream） |
+| プロジェクト | 8（M2DX, M2DX-Core, MIDI2Kit, 1Take, TineModeler3, TineModeler4, PeerClock, memdream） |
 | observations | 185 |
-| consolidated_memories | 26 |
-| knowledge_graph triples | 143 |
-| エコシステム | 3（m2dx-ecosystem, tinemodeler-ecosystem, music-apps） |
-| dream runs | 2回（初回168件 → 2回目17件、冪等に増分処理） |
-| TiDB ストレージ | 数 MB（無料枠の1%以下） |
-| エンベディング | Ollama bge-large, 1024次元, ローカル実行 |
-| 要約 LLM | Ollama qwen3:14b, ローカル実行 |
+| consolidated memories | 26 |
+| knowledge graph triples | 143 |
+| エコシステム | 3 |
+| dream runs | 2回（初回168件 → 2回目17件） |
 
-全部ローカル + TiDB Cloud Serverless の無料枠で動いてる。外部 API キー不要。
+全部ローカル（Ollama）+ TiDB Cloud Serverless の無料枠で動いてる。外部 API キー不要。TiDB の無料枠は月 25 GiB + 250M RU で、開発記憶用途だと使用量は1%以下。
 
-## TiDB がこの用途に向いてる理由まとめ
+## ベクトル DB じゃなくて TiDB を選ぶ理由
 
-| 要件 | TiDB の対応 | ベクトル専用 DB だと |
-|---|---|---|
-| ベクトル検索 | `VEC_COSINE_DISTANCE` + HNSW | ✅ 得意 |
-| トランザクション | MySQL 互換の ACID | ❌ 弱いか無い |
-| 生成カラム + UNIQUE 制約 | `content_hash AS SHA2(...) STORED` | ❌ できない |
-| 外部キー | FK で projects → observations を参照整合 | ❌ できない |
-| HTAP | 書き込みと検索が干渉しない | N/A（検索専用） |
-| MySQL エコシステム | `mysql2` でそのまま繋がる | 独自クライアント |
-| 無料枠 | 25 GiB + 250M RU | サービスによる |
+整理するとこう。
 
-*ベクトル検索「だけ」なら専用 DB でいい。でも「ベクトル + リレーション + トランザクション」が全部要るなら TiDB が楽。*
+ベクトル検索「だけ」なら Pinecone や Qdrant でいい。でも memdream みたいに「ベクトル検索 + 重複排除 + 外部キー + フラグ管理 + エコシステム JOIN」が全部要るなら、それを全部アプリ側で実装するより TiDB に1本化した方が楽。
 
-## 次にやりたいこと
+特に HTAP。書き込みと検索が同時に走る用途で、行ストアと列ストアが物理的に分離されてるのは安心感がある。pgvector だと同じストレージ上で競合するし、ベクトル専用 DB だとトランザクションが弱い。
 
-- dream-agent のスケジュール実行（launchd で毎晩走らせる）
-- `memory_search` の text fallback（ベクトル検索 + FULLTEXT のハイブリッド）
-- TiDB の TTL（Time-to-Live）で古い observations を自動アーカイブ
-- 他の AI ツール（Cursor, Windsurf）からの MCP 接続
+MySQL 互換なのも地味に大きい。`mysql2` でそのまま繋がるから、新しいクライアントライブラリを覚える必要がない。
 
-…TiDB の TTL 機能で `expires_at` カラムを使えば、consolidated_memories に有効期限を付けて古い記憶を自動で消せる。RDB の機能がそのまま使えるのは地味に便利。
+## これから
+
+- dream-agent を launchd で毎晩自動実行
+- TiDB の TTL（Time-to-Live）で古い observations に有効期限を付けて自動アーカイブ
+- ベクトル検索 + FULLTEXT のハイブリッド検索
+- Cursor や Windsurf からの MCP 接続
+
+…TTL で `consolidated_memories` に有効期限を付けて、古い統合記憶を自動で消す。3ヶ月前のレビュー結果はもう要らないかもしれないけど、ナレッジグラフの関係性は残したい、みたいな使い分けが `expires_at` カラム1つでできる。RDB の機能がそのまま使えるのがやっぱり楽。

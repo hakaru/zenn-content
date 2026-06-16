@@ -3,7 +3,7 @@ title: "AIエージェントの記憶は「夢」で整理する — TiDB Cloud 
 emoji: "🧠"
 type: "tech"
 topics: ["tidb", "mcp", "claude", "vectordb", "ai"]
-published: false
+published: true
 ---
 
 :::message
@@ -30,6 +30,8 @@ published: false
 人間は寝てる間に記憶を整理する。同じことを AI エージェントにやらせたい。だから名前は memdream。
 
 TiDB Cloud をストレージにした AI エージェント用の長期記憶システムを自作して、8週間運用した。現在の中身は観測 2,218件、統合記憶 217件、ナレッジグラフ 1,187本。この記事はその設計と運用の実録。
+
+**8週間 / 23プロジェクト / 観測 2,218件 / 統合記憶 217件 / 知識グラフ 1,187本 / TiDB 課金ゼロ。** これを TiDB Cloud 1本(ベクトル + SQL + HTAP)で動かしてる。
 
 https://github.com/hakaru/memdream
 
@@ -275,6 +277,14 @@ mem9 が勝ってる部分は素直に認める。フックによる全自動記
 
 逆に言うと、この4つが要らないなら自作する理由はあんまりない。知ってたら作らなかったかというと…スコープとグラフが欲しかったので、たぶん作ってた。
 
+### さらに新しいもの — Agent State Stack と Auto Embedding
+
+書いてる最中の2026年6月11日、PingCAP が **Agent State Stack**(TiDB Cloud Zero + mem9 + drive9)を発表した。エージェントの「記憶・状態・成果物」をマネージドで一式持つスタックで、memdream がやってることのマネージド版がまた一段ぶん増えた格好。
+
+方向性は完全に被ってる。それでも自作を続ける理由は前述の4つ(スコープ・グラフ・ローカル埋め込み・MCP)そのまま。とくに **Auto Embedding(サーバー側でテキスト→ベクトル変換してくれる機能)** を使わず Ollama bge-large のローカル埋め込みに固執してるのは、*コードの作業ログを外部に出したくない*から。マネージドが楽なのは分かってて、それでも「記憶の素材＝自分のコード」だけはローカルに置く、という線引き。
+
+つまり memdream は「マネージドの Agent State Stack を、スコープ付き + 知識グラフ + ローカル埋め込みで自前実装した版」。大半の人はマネージドが正解だと思う。でもこの3点が要るなら、自作の意味はまだある。
+
 ## まとめ
 
 8週間運用しての TiDB 評価。
@@ -293,3 +303,12 @@ mem9 が勝ってる部分は素直に認める。フックによる全自動記
 - Codex / Gemini CLI からの MCP 接続
 
 記憶が溜まるほど、セッション開始時の「このプロジェクトはですね…」という説明し直しが消えていく。8週間でだいぶ消えた。次の8週間でどこまで消えるか。
+
+---
+
+この記憶システムを建てる前に、土台のベクトル DB を TiDB / Chroma / Pinecone で実測比較した記事もある。
+
+- [ベクトル DB 比較編(RAG品質)](https://zenn.dev/hakaru/articles/tidb-rag-code-review-vector-comparison)
+- [性能・HTAP 実測編](https://zenn.dev/hakaru/articles/tidb-rag-vectordb-htap-benchmark)
+
+*本記事は [Zennfes Spring 2026 × TiDB](https://zenn.dev/contests/zennfes-spring-2026-tidb) への応募作品です。*

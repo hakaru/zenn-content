@@ -2,8 +2,8 @@
 title: "自作MCPサーバーに記憶を食わせたら、3プロジェクト横断でバグが11件見つかった"
 emoji: "🧠"
 type: "tech"
-topics: ["mcp", "claude", "codex", "gemini", "codereview"]
-published: false
+topics: ["tidb", "mcp", "claude", "codereview", "ai"]
+published: true
 ---
 
 ## AIに「前の会話覚えてる？」って聞いたこと、ある？
@@ -225,3 +225,11 @@ memdream 49件 + M2DX 15件 + M2DX-Core 30件 = **94件**を一括投入。レ�
 - MIDI2Kit #48（ビットレプリケーション）の対応
 
 …Codex と Gemini を討論させるのも面白そう。「この設計どう思う？」を両方に投げて、意見が割れたところだけ人間が判断する、みたいな。
+
+---
+
+これは memdream を作り始めた頃(2026-05)の記録。その後 dream-agent(夜間の統合バッチ)も実装して8週間運用した全体像は別記事にまとめた。
+
+- [AIエージェントの記憶は「夢」で整理する — TiDB に観測2,218件を溜めた8週間の実録](https://zenn.dev/hakaru/articles/memdream-tidb-vector-ai-memory)
+
+*本記事は [Zennfes Spring 2026 × TiDB](https://zenn.dev/contests/zennfes-spring-2026-tidb) への応募作品です。*

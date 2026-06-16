@@ -6,7 +6,7 @@ topics: ["tidb", "rag", "llm", "vectordatabase", "swift"]
 published: true
 ---
 
-TiDB Serverless で **INSERT を 30件/分 投入し続けても OLAP クエリの p50 が 14ms で安定する**ことを実測した。SQLite + ChromaDB の 2 システム構成と同条件で比較した結果も合わせて、ベクトル DB 選定の実データを共有する。
+TiDB Cloud（旧 Serverless / 2025年8月に Starter へ改名）で **INSERT を 30件/分 投入し続けても OLAP クエリの p50 が 14ms で安定する**ことを実測した。SQLite + ChromaDB の 2 システム構成と同条件で比較した結果も合わせて、ベクトル DB 選定の実データを共有する。
 
 [前の記事（番外編①）](https://zenn.dev/hakaru/articles/tidb-rag-code-review-vector-comparison) でローカル LLM コードレビューに TiDB / ChromaDB / Pinecone の 3 DB を使った RAG を試して、品質はどの DB もほぼ同じ（Top-K 一致率 98〜99%、全 DB で +1〜+1.6 点改善）と分かった。
 
@@ -67,19 +67,19 @@ SQLite から `avg_score ≥ 4.0` の高品質レビュー 94 件を取得。70 
 
 ローカル vs クラウドの差がそのまま出ただけですかね。クラウド同士だと TiDB が Pinecone の 1.5 倍速い。
 
-### 検索レイテンシ（20クエリ、embedding 時間を除くDB単体）
+### 検索レイテンシ（20クエリ、エンドツーエンド）
 
 p50/p95/p99 は分布指標（小さい順に並べたとき 50番目/95番目/99番目の値）。平均値より外れ値に引っ張られにくい。
 
 | DB | p50 | p95 | p99 |
 |---|---|---|---|
 | ChromaDB（ローカル） | **42 ms** | 396 ms | 414 ms |
-| TiDB Serverless | 1,157 ms | 1,260 ms | 1,264 ms |
-| Pinecone Serverless | 1,623 ms | 2,025 ms | 2,027 ms |
+| TiDB Cloud（東京リージョン） | 1,157 ms | 1,260 ms | 1,264 ms |
+| Pinecone（us-east-1） | 1,623 ms | 2,025 ms | 2,027 ms |
 
-ChromaDB の p95 が 396ms と高いのは、ローカル HNSW の初回インデックス展開が走るから。2回目以降は低レイテンシに安定する。
+念のため断っておくと、これは**エンジン速度の比較ではない**。クラウド勢の p50/p95/p99 がほぼ団子（TiDB 1,157/1,260/1,264）なのは、HNSW 検索そのものじゃなくて**東京→クラウドの往復ネットワークが律速**してる指紋。HNSW の検索が1秒かかるわけがない。ローカルの Chroma はプロセス内呼び出しでネットワークがゼロだから速くて当然で、ここから「TiDB のエンジンが遅い」とは言えない。クラウド同士で TiDB が Pinecone より速く見えるのも、東京と us-east-1 の地理差。*エンジン単体のレイテンシを測るには同一リージョンのクライアントから叩く必要がある（次の宿題）。*
 
-クラウド同士だと TiDB が Pinecone より約 30% 速かった。Pinecone の Starter プランが us-east-1 固定なのが効いてる。
+ChromaDB の p95 が 396ms と高いのは、ローカル HNSW の初回インデックス展開が走るから。2回目以降は安定する。
 
 ### Top-K 一致率（TiDB 基準）
 
@@ -157,8 +157,8 @@ TiDB、**全く劣化しない**。30件/分 INSERT しながらでも 14ms で�
 SQLite は 10件/分 で 5.0ms に増加（ライトロックの競合）。絶対値は速いけど、ベクトル検索のために ChromaDB への別クエリが必要になる。
 
 ```
-ChromaDB + SQLite:  OLAP 3.5ms ✅  Vector 1.3ms ✅  2システム管理 ❌
-TiDB Serverless:    OLAP  15ms ✅  Vector 1.2s  ✅  1システムで完結 ✅
+ChromaDB + SQLite:  OLAP 3.5ms ✅  Vector 1.3ms(ローカル)   ✅  2システム管理 ❌
+TiDB Cloud:         OLAP  15ms ✅  Vector 1.2s(往復NW込み)  ✅  1システムで完結 ✅
 ```
 
 「書きながら集計する」LoRA データ収集みたいなユースケースには TiDB の 1 本管理がかなり合ってる。
@@ -212,14 +212,14 @@ M2DX → 1Take → 次のアプリ、と増えていっても `project` カラ�
 
 | 計測内容 | 結果 |
 |---|---|
-| Ingest スループット | ChromaDB 2.6件/秒 ≫ TiDB 0.9 > Pinecone 0.6 |
-| 検索 p50（DB単体） | ChromaDB 42ms ≪ TiDB 1,157ms < Pinecone 1,623ms |
-| Top-K 一致率 | 98〜99%。どのDBも同じ結果を返す |
-| HTAP | TiDB: 30件/分 INSERT 中も OLAP 14ms で安定。SQLite + Chroma は 2 システム管理が必要 |
+| Ingest スループット | ローカルの ChromaDB 2.6件/秒。クラウド勢は TiDB 0.9 > Pinecone 0.6 |
+| 検索 p50（往復NW込み） | ローカル Chroma 42ms。クラウド勢はネットワーク律速で TiDB 1,157ms / Pinecone 1,623ms（エンジン速度の比較ではない） |
+| Top-K 一致率 | 98〜99%。どのDBも同じ結果を返す＝**検索品質はDBで変わらない** |
+| HTAP | TiDB: 30件/分 INSERT 中も OLAP 14ms で無劣化。敗者は SQLite + Chroma の **2システム構成**（同期コストと不整合リスク） |
 
-- **プロトタイプ・ローカル** → ChromaDB 一択。`pip install` して終わり、速い
-- **クラウド本番・チーム共有** → TiDB（Pinecone より速くて SQL とベクトルが 1 本）
-- **書きながら集計もしたい** → TiDB（HTAP で書き込み負荷に強く、SQL で管理クエリが書ける）
+- **プロトタイプ・ローカルだけで完結** → ChromaDB。`pip install` で終わり、速い
+- **クラウド本番・SQLと一緒に運用** → TiDB。ベクトルと集計が1テーブルに同居して管理が1システムで済む（2システム構成の同期地獄を回避できるのが本質）
+- **書きながら集計したい（ダッシュボード・世代比較）** → TiDB。HTAP で書き込み負荷に強く、管理クエリが SQL でそのまま書ける
 
 RAG 品質の比較は[前の記事](https://zenn.dev/hakaru/articles/tidb-rag-code-review-vector-comparison)に書いたのでそちらも。まだまだ続く。。。
 
@@ -249,6 +249,7 @@ https://testflight.apple.com/join/BAtGszPw
 - [（４）LoRA 編 — 誤検知 93% 削減](https://zenn.dev/hakaru/articles/swift-audit-lora-fp-reduction)
 - [（５）M2LoRA パイプライン編 — 開発しながら自動でデータが貯まる仕組み](https://zenn.dev/hakaru/articles/m2lora-code-review-pipeline)
 - [（番外）ベクトルDB比較 RAG品質編](https://zenn.dev/hakaru/articles/tidb-rag-code-review-vector-comparison)
+- [（応用）AIエージェントの記憶は「夢」で整理する — TiDB に観測2,218件を溜めた8週間の実録](https://zenn.dev/hakaru/articles/memdream-tidb-vector-ai-memory)
 :::
 
 *本記事は [Zennfes Spring 2026 × TiDB](https://zenn.dev/contests/zennfes-spring-2026-tidb) への応募作品です。*

@@ -231,9 +231,9 @@ RAG 品質の比較は[前の記事](https://zenn.dev/hakaru/articles/tidb-rag-c
 
 https://apps.apple.com/us/app/1take/id6757945099
 
-**M2DX** — iOS/macOS 向け MIDI 2.0 対応 DX7 互換 FM シンセサイザー。TestFlight で公開ベータ配布中。
+**M2DX** — iOS/macOS 向け MIDI 2.0 対応 DX7 互換 FM シンセサイザー。App Store で配信中（無料、WWDC26 週に公開）。
 
-https://testflight.apple.com/join/BAtGszPw
+https://apps.apple.com/jp/app/m2dx/id6763840208
 
 **M2LoRA** — 上記アプリのコミットを自動レビュー・採点・合成して LoRA 学習データを溜めるパイプライン（本記事の題材）。
 :::

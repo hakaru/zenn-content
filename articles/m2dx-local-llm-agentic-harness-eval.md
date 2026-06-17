@@ -9,7 +9,7 @@ published: false
 :::message
 **この記事の対象プロジェクト**
 
-- **M2DX** — iOS/macOS 向け MIDI 2.0 対応 DX7 互換 FM シンセサイザーアプリ。[TestFlight 公開ベータ](https://testflight.apple.com/join/BAtGszPw) で試せる
+- **M2DX** — iOS/macOS 向け MIDI 2.0 対応 DX7 互換 FM シンセサイザーアプリ。[App Store で配信中（無料）](https://apps.apple.com/jp/app/m2dx/id6763840208)
 - **M2DX-Core** — M2DX の DX7 互換エンジン部分。Pure Swift、Apache 2.0 で OSS 公開: [github.com/hakaru/M2DX-Core](https://github.com/hakaru/M2DX-Core)
 - **MIDI2Kit** — M2DX-Core が依存する Swift 製 MIDI 2.0 ライブラリ。SysEx の受信・バッファ管理・UMP デコードを担う。本記事では「上流ライブラリがどこまで守っているか」を検証する主役になる。開発の経緯は[こちらの本](https://zenn.dev/books/midi2kit-development-journey/)にまとめてある
 :::
@@ -18,7 +18,7 @@ published: false
 
 ひと月前くらいに [ローカルLLMって本当に開発に使える？DX7エンジンの監査をやらせたら、全然だめでした。。](https://zenn.dev/hakaru/articles/m2dx-local-llm-audit-zero-true-positives) という記事を書いた。要点だけ:
 
-- iOS/macOS向けのMIDI 2.0 FM音源アプリ **M2DX** ([TestFlight 公開ベータ](https://testflight.apple.com/join/BAtGszPw)) を開発中、心臓部は OSS の DX7 互換エンジン **M2DX-Core**
+- iOS/macOS向けのMIDI 2.0 FM音源アプリ **M2DX** ([App Store で配信中（無料）](https://apps.apple.com/jp/app/m2dx/id6763840208)) を開発中、心臓部は OSS の DX7 互換エンジン **M2DX-Core**
 - 手元の Mac Studio M3 Ultra 96GB で ollama に **10 機種のローカル LLM** (qwen3:14b, gemma3:12b, codestral:22b, llama3.3:70b, mixtral:8x22b 等) を動かし、バグ監査 + セキュリティ監査をやらせた
 - 結果: **累計 52 件の指摘 → 真陽性 0 件**
 
@@ -270,4 +270,4 @@ aider 方式は **単発より速いケースもある** (codestral)、**単発�
 
 - 母体記事: <https://zenn.dev/hakaru/articles/m2dx-local-llm-audit-zero-true-positives>
 - **M2DX-Core (OSS)**: <https://github.com/hakaru/M2DX-Core>
-- **M2DX (TestFlight)**: <https://testflight.apple.com/join/BAtGszPw>
+- **M2DX (App Store)**: <https://apps.apple.com/jp/app/m2dx/id6763840208>

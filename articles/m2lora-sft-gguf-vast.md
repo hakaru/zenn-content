@@ -9,7 +9,7 @@ published: false
 :::message
 **この記事の対象プロジェクト**
 
-- **M2DX** — iOS/macOS 向け MIDI 2.0 対応 DX7 互換 FM シンセサイザーアプリ。[TestFlight 公開ベータ](https://testflight.apple.com/join/BAtGszPw) で試せる
+- **M2DX** — iOS/macOS 向け MIDI 2.0 対応 DX7 互換 FM シンセサイザーアプリ。[App Store で配信中（無料）](https://apps.apple.com/jp/app/m2dx/id6763840208)
 - **M2LoRA** — M2DX の git commit を自動でレビューさせ、LoRA 学習データを貯めるパイプライン
 :::
 

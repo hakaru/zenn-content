@@ -12,9 +12,9 @@ iOS/macOS アプリを個人開発中！
 
 https://apps.apple.com/us/app/1take/id6757945099
 
-**M2DX** — iOS/macOS 向け MIDI 2.0 対応 DX7 互換 FM シンセサイザー。TestFlight で公開ベータ配布中。
+**M2DX** — iOS/macOS 向け MIDI 2.0 対応 DX7 互換 FM シンセサイザー。App Store で配信中（無料、WWDC26 週に公開）。
 
-https://testflight.apple.com/join/BAtGszPw
+https://apps.apple.com/jp/app/m2dx/id6763840208
 
 この M2DX の開発中に「ローカル LLM でコードレビューを自動化できないか」を試し始めたのがシリーズの始まり。
 
@@ -23,7 +23,7 @@ https://testflight.apple.com/join/BAtGszPw
 :::message
 **この記事の対象プロジェクト**
 
-- **M2DX** — iOS/macOS 向け MIDI 2.0 対応 DX7 互換 FM シンセサイザーアプリ。[TestFlight 公開ベータ](https://testflight.apple.com/join/BAtGszPw) で試せる
+- **M2DX** — iOS/macOS 向け MIDI 2.0 対応 DX7 互換 FM シンセサイザーアプリ。[App Store で配信中（無料）](https://apps.apple.com/jp/app/m2dx/id6763840208)
 - **M2DX-Core** — M2DX の DX7 互換エンジン部分。Pure Swift、Apache 2.0 で OSS 公開
 - **MIDI2Kit** — M2DX-Core が依存する Swift 製 MIDI 2.0 ライブラリ
 - **M2LoRA** — 上記リポジトリのコミットを自動レビュー・採点・合成し、LoRA 学習データを貯めるパイプライン（private）
@@ -395,4 +395,4 @@ TiDB は「スコアが高くて類似した diff だけ引いてくる」「世
 ---
 
 - **M2DX-Core (OSS)**: https://github.com/hakaru/M2DX-Core
-- **M2DX (TestFlight)**: https://testflight.apple.com/join/BAtGszPw
+- **M2DX (App Store)**: https://apps.apple.com/jp/app/m2dx/id6763840208

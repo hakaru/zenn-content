@@ -12,7 +12,7 @@ published: true
 この記事で溜まっていく「記憶」を生産してるのは、個人で並行開発してる iOS / macOS アプリたち。先に置いておく。
 
 - **1Take** — プロ向けオーディオ録音アプリ。App Store 配信中 → https://apps.apple.com/us/app/1take/id6757945099
-- **M2DX** — MIDI 2.0 対応・DX7 互換の FM シンセ。TestFlight でパブリックベータ配布中 → https://testflight.apple.com/join/BAtGszPw
+- **M2DX** — MIDI 2.0 対応・DX7 互換の FM シンセ。App Store 配信中（無料、WWDC26 週に公開）→ https://apps.apple.com/jp/app/m2dx/id6763840208
 - そして記事の主役、記憶システム **memdream** → https://github.com/hakaru/memdream
 
 ここから本題。
@@ -55,9 +55,9 @@ AI とのセッションは切れるとコンテキストがリセットされ�
 
 ### M2DX — MIDI 2.0 対応 DX7 互換 FM シンセサイザー
 
-ヤマハ DX7(1983年の名機)互換の FM 音源を、6オペレータ × 32アルゴリズムで Pure Swift 6 実装した iOS シンセ。TestFlight でパブリックベータ配布中。
+ヤマハ DX7(1983年の名機)互換の FM 音源を、6オペレータ × 32アルゴリズムで Pure Swift 6 実装した iOS シンセ。App Store で配信中（無料）。
 
-https://testflight.apple.com/join/BAtGszPw
+https://apps.apple.com/jp/app/m2dx/id6763840208
 
 中身は3つのリポジトリに分かれてる。アプリ本体の M2DX、FM 合成エンジンの M2DX-Core、MIDI 2.0 プロトコルライブラリの MIDI2Kit。memdream ではこの3つを「m2dx-ecosystem」という1つのエコシステムとして括ってる。この記事で「エコシステム記憶」の実例として出てくるのはこいつら。
 

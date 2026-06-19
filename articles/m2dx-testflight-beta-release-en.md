@@ -10,7 +10,7 @@ published: true
 
 https://testflight.apple.com/join/BAtGszPw
 
-The synthesis engine is based on [M2DX-Core](https://hakaru.net/M2DX-Core-support/), a standalone Swift library that ports the msfa/Dexed FM core using Int32 Q24 fixed-point arithmetic — the same approach that gives vintage Yamaha hardware its character.
+The synthesis engine is [M2DX-Core](https://hakaru.net/M2DX-Core-support/), a standalone Swift library that independently reimplements the DX7-style FM core in Int32 Q24 fixed-point, cross-validated against the Apache-2.0 msfa reference — the same log-domain approach that gives vintage Yamaha FM its character.
 
 Technical deep-dives (Japanese, English summaries in progress):
 

@@ -1,0 +1,124 @@
+---
+title: "MediaMTXを蹴った2ヶ月後、MediaMTXに出戻りを決めた。要件が1個消えると最適解はひっくり返る"
+emoji: "🛰️"
+type: "tech"
+topics: ["srt", "mediamtx", "livekit", "ios", "claudecode"]
+published: false
+---
+
+## 「iPhoneとサーバの間、SRTにしたい」
+
+[前回](/hakaru/articles/realtimecamera-livekit-recording-server)、iPhone のカメラ映像を LiveKit（セルフホスト SFU）でサーバに送って録画する基盤を作った。あのとき方式選定で **MediaMTX + SRT を蹴って LiveKit を選んだ**。決め手は制御チャネル。カメラの遠隔操作が要件にあって、LiveKit なら RPC が標準で乗っているから、という理由だった。
+
+それから2ヶ月弱。iOS アプリも遠隔操作もダッシュボードも一通り動くようになった段階で、冒頭の一言が来た。
+
+*せっかく作った RPC の配線、どうすんの…* と思いつつ要件を整理したら、最終的に **LiveKit 完全撤去 + MediaMTX 出戻り**という結論になった。この記事はその設計編。実装はまだ1行も書いてない。書いてないのに、設計レビューだけでかなり転んだので先にそれを書く。
+
+## LiveKit は「映像伝送」だけじゃなかった
+
+「iPhone→サーバを SRT に変える」と言ったとき、変わるのは映像の経路だけに見える。実際は違う。現行システムで LiveKit が担っている機能は5つある。
+
+- 映像の publish（iPhone → SFU）
+- ライブ視聴（ブラウザが subscribe）
+- 遠隔制御（RPC で `camera.start` とか投げる）
+- 状態報告（participant attributes で発熱・バッテリを配信）
+- 録画（Track Egress で無変換 MP4）
+
+SRT は1番目しか置き換えない。残り4つの行き先を決めないと設計にならない。
+
+## 動機を4択で聞いたら全部YESだった
+
+なぜ SRT にしたいのか。選択肢を出して確認した。
+
+- 回線が不安定な環境での安定伝送（SRT の再送制御・遅延バッファ）✅
+- OBS / vMix みたいな配信業界標準ツールとの連携 ✅
+- WebRTC/LiveKit の複雑さの排除 ✅
+- WebRTC の輻輳制御に画質を下げられたくない、高ビットレート固定 ✅
+
+全部だった。3つ目に「複雑さの排除」が入った時点で、「LiveKit を残して SRT Ingress だけ足す」という折衷案は消える。LiveKit + Ingress + Redis になって、構成はむしろ増えるので。
+
+## 効いたのは「遠隔制御どうする？」の一問
+
+ライブ視聴は「低遅延必須（〜1秒）」、録画は「現行相当を維持」。ここまでは想定内。転換点は遠隔制御の扱いだった。
+
+回答: **廃止**。
+
+前回 MediaMTX を蹴った理由、そのものが要件から消えた。制御チャネルが要らないなら、SRT 受信・WebRTC(WHEP) 再生・録画を1プロセスでやってくれる MediaMTX が最短になる。livekit-server + egress + redis の3コンテナが mediamtx 1コンテナになり、RPC・attributes・トークン grant の配線も全部消える。
+
+前提がひとつ変わると最適解がひっくり返る。2ヶ月前の自分の選定が間違っていたわけじゃないのが救い。*あのときは制御チャネルが要件だったんだって…*
+
+## iOS 側: Larix は死んでいた
+
+サーバ側が MediaMTX なら、iPhone から SRT を送る側をどうするか。「Larix のライブラリ使える？」と聞かれて調べたら、**Larix Broadcaster SDK は sunset（提供終了）で購入不可**になっていた。公式サイトに "not available for purchase" と明記されている。アプリとしての Larix Broadcaster は健在だけど、自作アプリに組み込む道は閉じている。
+
+残る選択肢は2つ。
+
+| | HaishinKit (SRTHaishinKit) | 独自実装 (libsrt + VideoToolbox + TS mux) |
+|---|---|---|
+| 実装範囲 | エンコード〜SRT送出まで全部入り | MPEG-TS mux を自分で書く |
+| ライセンス/保守 | BSD-3、10年開発でメンテ活発 | libsrt 更新に永久に自分で追従 |
+| Swift 6 | strict concurrency 対応済み | C API との橋渡しを自前設計 |
+| 制御の自由度 | フレームワークの抽象の内側まで | SRT 統計を直接読んで適応ビットレートも可 |
+| 工数感覚 | 1 | 4〜6 |
+
+MPEG-TS の mux（PCR/PTS/DTS のタイミング設計）はバグの温床で、片手間で書ける規模じゃない。なので **HaishinKit を採用して、`StreamingEngine` というプロトコル境界の裏に置く**ことにした。将来「SRT 統計を読んで適応ビットレート制御を極めたい」となったら、境界の裏だけを libsrt 直接実装に差し替える。完全制御の代金は、必要になってから払う。
+
+## 新アーキテクチャ
+
+```
+iPhone (HaishinKit, SRT publish)
+   │ SRT (UDP, AES暗号化)
+   ▼
+MediaMTX ── WHEP/WebRTC ──▶ ブラウザ（〜1秒でライブ視聴）
+   │ ├ 録画 (fMP4セグメント→そのままMP4として再生可)
+   │ └ hooks ──▶ control-server（認証・録画ポリシー・SQLiteインデックス）
+```
+
+control-server（Node/TS）の「メディアを中継しない」原則は前回から変わらず。LiveKit webhook の代わりに MediaMTX の hooks を受けて、録画の自動/手動ポリシーと一覧・Range 配信・保持期限削除を今まで通りやる。
+
+## 設計書を AI エージェント21体にレビューさせたら17件刺さった
+
+spec を書いた後、コミット前にマルチエージェントのレビューを回した。構成は3レンズ。
+
+- **repo整合**: spec が既存コードについて言ってること、実在するか
+- **内部整合**: spec 単体で矛盾・曖昧・プレースホルダがないか
+- **技術事実**: MediaMTX / SRT / HaishinKit の仕様主張を Web で裏取り
+
+3レンズが出した指摘18件を、それぞれ別のエージェントが「反証しろ」というプロンプトで潰しにいく。生き残ったのが17件、棄却1件。合計21体。
+
+*17/18が本物って、自分の設計書どんだけ穴あったの…* と思いながら見たら、実際どれも痛かった。抜粋する。
+
+### 実装したら publish 全拒否になるやつ
+
+MediaMTX の外部認証 hook（`authHTTPAddress`）は、SRT パスフレーズとは**独立に publish にも適用される**。spec は「publish はパスフレーズで完結するから hook は視聴側だけ検証」と書いていた。このまま実装すると、パスフレーズが合っていても全 publish が認証拒否される。`authHTTPExclude` に publish を明示追加する必要があった。
+
+### hook 名が2週間前の知識で死んでるやつ
+
+`runOnReady` / `runOnNotReady` は MediaMTX v1.19.3 で `runOnAvailable` / `runOnUnavailable` にリネームされていた。旧名は deprecated 警告付きで動く。動くのが一番たちが悪い。バージョン固定を spec に明記して新名に統一。
+
+### 論理的に観測不能になるやつ
+
+現行は「online（接続中）だが未配信」という状態がある。iPhone が LiveKit room に常時接続して RPC を待つから。SRT は配信するときだけ接続するプロトコルなので、移行後この状態は**サーバから原理的に観測できない**。「現行 UI のまま、情報源だけ変更」と書いていた spec は成立しない。online と配信中をバッジごと統合する設計判断に書き換えた。
+
+### 手元で再現実験までしてきたやつ
+
+E2E テストは ffmpeg で SRT を publish する計画だった。レビューエージェントが実際にこの開発機で `ffmpeg -f mpegts srt://...` を叩いて **Protocol not found を実証**してきた。Homebrew core の ffmpeg は `--enable-libsrt` なしでビルドされている。libsrt 入りビルドの入手手段まで含めて spec に前提条件を追記。
+
+エージェントに「根拠には実ファイルパスか URL 必須、でっち上げるな」と縛りを入れて、さらに反証専用エージェントを重ねる構成は、レビュー精度に露骨に効く。棄却された1件も「spec 本文と食い違う主張」という妥当な理由で落ちていた。
+
+## で、いま Codex がそのレビューをレビューしている
+
+ここまでやった上で「codex レビューさせて」と追加注文が来たので、GPT-5.5 (Codex) にも spec を投げてある。まだ実行中なんだけど、途中経過の時点で1件面白いのが出ている。
+
+さっきの `authHTTPExclude` の件、21体レビューの反証エージェントは「除外された action は内部認証にフォールバックする」と結論して、spec には「`authInternalUsers` で publish を許可しておく」と書いた。Codex は公式ソースを追って「**フォールバックではなく即時許可**。`authInternalUsers` への期待は修正が必要」と言ってきている。
+
+AI のレビューを AI が反証して、その結論をさらに別の AI がひっくり返す。*どこまで再帰すんの…* とは思うけど、レイヤーを重ねるたびに実際に精度が上がっているので止める理由がない。最後は自分が公式ドキュメントで裁定する。
+
+## まとめ
+
+- 要件（遠隔制御）が1個消えたら、2ヶ月前に蹴った MediaMTX が最適解に戻ってきた
+- Larix SDK は sunset。iOS の SRT 送出は HaishinKit + 差し替え境界で
+- 設計書は書き上げてからが本番。21体レビューで17件、うち「実装したら動かない」級が複数
+- レビューのレビューまでやると、レビューの結論も転ぶ
+
+実装はこれから。`srt-migration` 統合ブランチで server → iOS → dashboard → deploy の順に進めて、E2E が通ったら main に一括マージする計画。実装編でまた書く。
